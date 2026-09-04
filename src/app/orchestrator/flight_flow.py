@@ -40,7 +40,7 @@ def get_flight_contextual_reminder(step: str, state: Dict[str, Any]) -> str | No
     elif step == "verify_passenger_count":
         return "Please verify the passenger count details above. If correct, click 'Yes' or reply 'Yes' to proceed."
     elif step == "awaiting_passenger_details":
-        total_pax = passenger_count.get("total") or 1
+        total_pax = passenger_count.get("total") if isinstance(passenger_count, dict) else (int(passenger_count) if passenger_count else 1)
         pax_num = current_passenger_index + 1
         pax = passengers_details[current_passenger_index] if current_passenger_index < len(passengers_details) else {}
         if not pax.get("name"):

@@ -156,6 +156,13 @@ Ensure you follow the strict formatting and rules. Do not hallucinate fields.
             
         return options
 
+    def get_msg_content(msg):
+        if hasattr(msg, "content"):
+            return msg.content
+        if isinstance(msg, dict):
+            return msg.get("content", "")
+        return str(msg)
+
     def make_response(res_dict):
         if interruption_answer:
             answer_text = interruption_answer.strip()
@@ -184,7 +191,7 @@ Ensure you follow the strict formatting and rules. Do not hallucinate fields.
                     res_dict["followup_quick_replies"] = ["Proceed with this option", "Select another one"]
             elif step in ["flight_selecting", "hotel_selecting"]:
                 orig_opts = res_dict.get("options_to_show") or state.get("options_to_show") or []
-                res_dict["options_to_show"] = filter_options_for_query(orig_opts, state["messages"][-1].content)
+                res_dict["options_to_show"] = filter_options_for_query(orig_opts, get_msg_content(state["messages"][-1]))
                 
         res_dict["interruption_question"] = None
         res_dict["clarification_repeats"] = clarification_repeats
@@ -201,17 +208,17 @@ Guidelines:
 2. Conciseness: Keep your response extremely brief, short, and focused. Limit your response strictly to a maximum of 2 sentences (or 2 lines). Do not write essays, bulleted lists, or excessive details.
 3. Out-of-Scope: Only decline questions that are completely unrelated to travel or destinations (e.g., coding, math, general science, personal advice). If and only if the question is completely unrelated to travel, respond exactly with: "I'm sorry, but I can only assist with travel-related queries such as flight bookings, hotel reservations, and itinerary planning. Please ask a travel-related question."
 """
-            msgs = [SystemMessage(content=qa_prompt)] + state["messages"][-2:]
+            msgs = [SystemMessage(content=qa_prompt)] + [m if hasattr(m, 'content') else HumanMessage(content=get_msg_content(m)) for m in state["messages"][-2:]]
             try:
                 response = llm.invoke(msgs)
                 msg = response.content
             except Exception as e:
                 print(f"Error calling general_qa LLM: {e}. Falling back to local travel QA.")
                 city = hotel_params.get("city") or flight_params.get("destination") or ""
-                msg = fallback_travel_qa(state["messages"][-1].content, city)
+                msg = fallback_travel_qa(get_msg_content(state["messages"][-1]), city)
         else:
             city = hotel_params.get("city") or flight_params.get("destination") or ""
-            msg = fallback_travel_qa(state["messages"][-1].content, city)
+            msg = fallback_travel_qa(get_msg_content(state["messages"][-1]), city)
         
         replies = ["Book a Flight", "Book a Hotel", "Plan an Itinerary"]
         res_data = {"final_response": msg, "quick_replies": replies, "options_to_show": []}

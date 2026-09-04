@@ -444,11 +444,17 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
     current_passenger_index = state.get("current_passenger_index") or 0
     pending_clarification = state.get("pending_clarification")
     
-    user_msg_text = state["messages"][-1].content.strip()
+    last_msg = state["messages"][-1]
+    if hasattr(last_msg, "content"):
+        user_msg_text = last_msg.content.strip()
+    elif isinstance(last_msg, dict):
+        user_msg_text = str(last_msg.get("content", "")).strip()
+    else:
+        user_msg_text = str(last_msg).strip()
     msg_text_lower = user_msg_text.lower()
     
     print("\n=== DEBUG parse_intent ===")
-    safe_user_msg = state['messages'][-1].content.encode('ascii', errors='backslashreplace').decode('ascii')
+    safe_user_msg = user_msg_text.encode('ascii', errors='backslashreplace').decode('ascii')
     print(f"User Message: {safe_user_msg}")
     print(f"Current Step: {state.get('current_step')}")
     print(f"flight_params: {flight_params}")
@@ -891,7 +897,7 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
         ))
     ):
         result.intent = "provide_details"
-        total_pax = passenger_count.get("total") or 1
+        total_pax = passenger_count.get("total") if isinstance(passenger_count, dict) else (int(passenger_count) if passenger_count else 1)
         
         while len(passengers_details) <= current_passenger_index:
             passengers_details.append({})
@@ -949,7 +955,7 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
             step = "hotel_booking_confirmed"
         else:
             # Flight payment: validate all passenger details are complete
-            total_pax = passenger_count.get("total") or 1
+            total_pax = passenger_count.get("total") if isinstance(passenger_count, dict) else (int(passenger_count) if passenger_count else 1)
             details_complete = True
             if not passengers_details or len(passengers_details) < total_pax:
                 details_complete = False
