@@ -9,7 +9,7 @@ from app.orchestrator.flight_flow import get_next_flight_step
 from app.config import settings
 
 class ExtractedInfo(BaseModel):
-    intent: Literal["book_flight", "book_hotel", "general_qa", "select_flight", "select_hotel", "provide_details", "payment_done", "provide_passenger_count", "confirm", "reject"] = "general_qa"
+    intent: Literal["book_flight", "book_hotel", "plan_itinerary", "general_qa", "select_flight", "select_hotel", "provide_details", "payment_done", "provide_passenger_count", "confirm", "reject"] = "general_qa"
     origin: str | None = Field(description="The 3-letter IATA code of the origin city or airport (e.g. 'BLR', 'DEL', 'JFK', 'TYO'). ALWAYS convert full city or country names to their primary 3-letter IATA code.", default=None)
     destination: str | None = Field(description="The 3-letter IATA code of the destination city or airport (e.g. 'BLR', 'DEL', 'JFK', 'TYO'). ALWAYS convert full city or country names to their primary 3-letter IATA code.", default=None)
     departure_date: str | None = None
@@ -66,6 +66,127 @@ def resolve_relative_checkout(check_in_str: str, user_text: str) -> str | None:
     except Exception as e:
         print(f"Error resolving relative checkout date: {e}")
     return None
+
+def extract_passenger_fields(raw_text: str, existing_pax: Dict[str, Any] | None = None) -> tuple[Dict[str, Any], List[str]]:
+    """
+    Robust deterministic extractor for passenger details in flight bookings.
+    Handles:
+      - Single-field entry (e.g. user enters only Name, or only Email, or only Phone, or only Passport)
+      - Multi-field comma-separated entry (e.g. "Soujanya S P, soujanya@gmail.com, +91 8088091773, AR564543")
+      - Key-value labeled entry (e.g. "Name: Kushal S, Email: kushal@gmail.com, Phone: 9876543210, Passport: M1234567")
+      - Space-separated entry (e.g. "Kushal S kushal@gmail.com +919876543210 M1234567")
+    NEVER overwrites already-populated valid fields with wrong types.
+    """
+    pax = dict(existing_pax or {})
+    errors = []
+    text = raw_text.strip()
+    
+    # 1. Email extraction
+    email_match = re.search(r"\b[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+\b", text)
+    if email_match:
+        pax["email"] = email_match.group(0).strip()
+        
+    # 2. Phone / Contact extraction
+    phone_match = re.search(r"(\+?\d{1,4}[- ]?\d{10})\b", text)
+    if not phone_match:
+        phone_match = re.search(r"\b\d{10}\b", text)
+    if phone_match:
+        clean_phone = re.sub(r"[^\d+]", "", phone_match.group(0))
+        if len(clean_phone) == 10:
+            pax["contact"] = f"+91{clean_phone}"
+        elif len(clean_phone) > 10:
+            if not clean_phone.startswith("+"):
+                clean_phone = f"+{clean_phone}"
+            pax["contact"] = clean_phone
+
+    # 3. Passport extraction
+    # A. Explicit label: "passport: ABC12345" or "passport no: AR564543"
+    passport_label_match = re.search(r"\b(?:passport(?:\s*(?:no|number|num))?[:\s\-]+)([A-Za-z0-9]{6,15})\b", text, re.I)
+    if passport_label_match:
+        pax["passport"] = passport_label_match.group(1).upper()
+    else:
+        # B. Token-based detection
+        non_passport_words = {
+            "PASSENGER", "PASSPORT", "CONTACT", "NUMBER", "EMAIL", "NAME", "ADULT", "CHILD",
+            "INFANT", "PLEASE", "FLIGHT", "HOTEL", "INDIA", "ONE", "TWO", "THREE", "FOUR",
+            "TODAY", "TOMORROW", "AIRLINE", "TICKET", "BOOKING", "ECONOMY", "BUSINESS",
+            "GUEST", "FIRST", "SECOND", "THIRD", "PROCEED", "PAYMENT", "DONE", "SELECT"
+        }
+        passport_tokens = re.findall(r"\b[A-Za-z0-9]{6,15}\b", text)
+        for tok in passport_tokens:
+            tok_upper = tok.upper()
+            if tok_upper in non_passport_words:
+                continue
+            if email_match and tok.lower() in email_match.group(0).lower():
+                continue
+            if phone_match and tok in re.sub(r"[^\d]", "", phone_match.group(0)):
+                continue
+            # Prefer tokens with both letters and numbers, or standalone alphanumeric codes
+            has_letters = any(c.isalpha() for c in tok)
+            has_digits = any(c.isdigit() for c in tok)
+            if has_letters and has_digits:
+                pax["passport"] = tok_upper
+                break
+            elif not pax.get("passport") and has_digits and len(tok) >= 6:
+                pax["passport"] = tok_upper
+
+    # 4. Name extraction
+    # A. Explicit label: "name: Kushal S" or "name of the passenger: Yadunandan K D" or "passenger name: ..."
+    name_label_match = re.search(r"\b(?:name\s*(?:of\s*(?:the\s*)?passenger)?[:\s\-]+|passenger\s*name[:\s\-]+|mr\.\s*|ms\.\s*|mrs\.\s*)([A-Za-z\s\.]+)", text, re.I)
+    if name_label_match:
+        cand_name = name_label_match.group(1).strip()
+        cand_name = cand_name.split(",")[0].strip()
+        if len(cand_name) >= 2 and not any(w in cand_name.lower() for w in ["@"]):
+            pax["name"] = cand_name
+
+    # B. Comma-separated structure: "Soujanya S P, soujanya@gmail.com, +91 8088091773, AR564543"
+    elif "," in text:
+        parts = [p.strip() for p in text.split(",") if p.strip()]
+        for p in parts:
+            p_clean = re.sub(r"^(?:name\s*(?:of\s*(?:the\s*)?passenger)?[:\s\-]*|passenger\s*name[:\s\-]*|mr\.\s*|ms\.\s*|mrs\.\s*)", "", p, flags=re.I).strip()
+            if email_match and p_clean.lower() in email_match.group(0).lower():
+                continue
+            if phone_match and p_clean in phone_match.group(0):
+                continue
+            if pax.get("passport") and p_clean.upper() == pax["passport"]:
+                continue
+            if len(p_clean) >= 2 and not re.search(r"\d{4,}", p_clean) and not any(p_clean.lower().startswith(w) for w in ["yes", "no", "skip", "book", "select", "payment"]):
+                pax["name"] = p_clean
+                break
+
+    # C. Single-field / dedicated input when Name is missing and no other contact fields are present
+    elif not pax.get("name") and not email_match and not phone_match:
+        p_clean = re.sub(r"^(?:name\s*(?:of\s*(?:the\s*)?passenger)?[:\s\-]*|passenger\s*name[:\s\-]*|mr\.\s*|ms\.\s*|mrs\.\s*)", "", text, flags=re.I).strip()
+        is_passport_cand = bool(pax.get("passport") and p_clean.upper() == pax["passport"]) or bool(re.match(r"^[A-Za-z]{1,3}\d{6,10}$", p_clean))
+        if not is_passport_cand:
+            if len(p_clean) >= 2 and not any(p_clean.lower().startswith(w) for w in ["yes", "no", "skip", "book", "select", "payment", "proceed"]):
+                pax["name"] = p_clean
+
+    # D. Multi-field space-separated extraction (remove email, phone, passport from text)
+    if not pax.get("name"):
+        rem_text = text
+        if email_match:
+            rem_text = rem_text.replace(email_match.group(0), "")
+        if phone_match:
+            rem_text = rem_text.replace(phone_match.group(0), "")
+        if pax.get("passport"):
+            rem_text = re.sub(re.escape(pax["passport"]), "", rem_text, flags=re.I)
+        rem_text = re.sub(r"[,:\-_]+", " ", rem_text).strip()
+        rem_text = re.sub(r"^(?:name\s*(?:of\s*(?:the\s*)?passenger)?[:\s\-]*|passenger\s*name[:\s\-]*|mr\.\s*|ms\.\s*|mrs\.\s*)", "", rem_text, flags=re.I).strip()
+        if len(rem_text) >= 2 and not re.search(r"\d{4,}", rem_text):
+            pax["name"] = rem_text
+
+    # Validation checks on populated fields
+    if pax.get("name") and len(pax["name"]) < 2:
+        errors.append("Name must be at least 2 characters long.")
+    if pax.get("email") and not re.match(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$", pax["email"]):
+        errors.append("Email address is invalid.")
+    if pax.get("contact") and not re.match(r"^\+?\d{1,4}\d{10}$", pax["contact"]):
+        errors.append("Contact number must include a country code followed strictly by 10 digits (e.g. +919876543210).")
+    if pax.get("passport") and (len(pax["passport"]) < 6 or len(pax["passport"]) > 15 or not pax["passport"].isalnum()):
+        errors.append("Passport number must be 6-15 alphanumeric characters.")
+
+    return pax, errors
 
 def rule_based_fallback(text: str, step: str | None, state: Dict[str, Any]) -> ExtractedInfo:
     text_clean = text.strip()
@@ -249,23 +370,15 @@ def rule_based_fallback(text: str, step: str | None, state: Dict[str, Any]) -> E
     # 8. Passenger details parsing
     if step == "awaiting_passenger_details":
         res.intent = "provide_details"
-        email_match = re.search(r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b", text_clean)
-        if email_match:
-            res.passenger_email = email_match.group(0)
-        phone_match = re.search(r"\b(?:\+?\d{1,3}[- ]?)?\d{10}\b", text_clean)
-        if phone_match:
-            res.passenger_contact = phone_match.group(0)
-        passport_match = re.search(r"\b[A-Z0-9]{6,15}\b", text_clean.upper())
-        if passport_match and not (email_match and passport_match.group(0) in email_match.group(0)):
-            res.passenger_passport = passport_match.group(0)
-            
-        parts = [p.strip() for p in text_clean.split(",")]
-        if len(parts) >= 1:
-            first_part = parts[0]
-            if not email_match or first_part.lower() not in email_match.group(0).lower():
-                if not phone_match or first_part not in phone_match.group(0):
-                    if not passport_match or first_part.upper() != passport_match.group(0):
-                        res.passenger_name = first_part
+        pax_extracted, _ = extract_passenger_fields(text_clean)
+        if pax_extracted.get("name"):
+            res.passenger_name = pax_extracted["name"]
+        if pax_extracted.get("email"):
+            res.passenger_email = pax_extracted["email"]
+        if pax_extracted.get("contact"):
+            res.passenger_contact = pax_extracted["contact"]
+        if pax_extracted.get("passport"):
+            res.passenger_passport = pax_extracted["passport"]
                         
     # 9. Option select by index
     if step in ["flight_selecting", "hotel_selecting"]:
@@ -499,11 +612,11 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
     incoming_step = step
     
     # Override for hotel suggestions requests
-    suggest_keywords = ["suggest", "recommend", "hostel", "hotel", "places to stay", "accommodation", "where to stay", "find me a stay"]
+    suggest_keywords = ["suggest", "recommend", "places to stay", "where to stay", "find me a stay", "hostel", "hostels"]
     is_suggest_query = any(k in msg_text_lower for k in suggest_keywords)
     target_city = result.hotel_city or result.destination or (flight_params.get("destination") if is_suggest_query else None)
     
-    is_in_hotel_flow = step is not None and (step.startswith("hotel_") or (step == "awaiting_payment" and state.get("selected_hotel", {}).get("name")))
+    is_in_hotel_flow = step is not None and (step.startswith("hotel_") or step in ["hotel_summary", "hotel_awaiting_payment", "hotel_booking_confirmed"])
     
     if is_suggest_query and target_city and not is_gathering_details and not is_in_hotel_flow and not any(w in msg_text_lower for w in ["flight", "plane", "ticket"]):
         result.intent = "book_hotel"
@@ -720,14 +833,9 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
         if result.selected_price and not is_button_select: selected_flight["price"] = result.selected_price
         if hasattr(result, "booking_link") and result.booking_link and not is_button_select: selected_flight["booking_link"] = result.booking_link
 
-        if not is_button_select and result.selected_option_index is not None and 0 <= result.selected_option_index < len(options_to_show):
-            identified_opt = options_to_show[result.selected_option_index]
-            options_to_show = [identified_opt]
-            step = "flight_selecting"
-        else:
-            step = "awaiting_passenger_count"
+        step = "awaiting_passenger_count"
         
-    elif step != "verify_passenger_count" and result.intent == "select_hotel" and not step.startswith("hotel_awaiting_") and step != "hotel_summary":
+    elif step != "verify_passenger_count" and result.intent == "select_hotel" and (incoming_step in ["hotel_selecting", "hotel_confirm_city", "hotel_confirm_dates"] or (incoming_step and incoming_step.startswith("hotel_"))) and not step.startswith("hotel_awaiting_") and step != "hotel_summary":
         old_ticket = state.get("hotel_ticket")
         if old_ticket and old_ticket.get("hotel_name"):
             # Save the new hotel choice temporarily
@@ -745,17 +853,12 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
             if pax.get("contact") and not selected_hotel.get("guest_phone"):
                 selected_hotel["guest_phone"] = pax.get("contact")
 
-            if not is_button_select_hotel and result.selected_option_index is not None and 0 <= result.selected_option_index < len(options_to_show):
-                identified_opt = options_to_show[result.selected_option_index]
-                options_to_show = [identified_opt]
-                step = "hotel_selecting"
-            else:
-                if not selected_hotel.get("guest_name"): step = "hotel_awaiting_guest_name"
-                elif not selected_hotel.get("guest_email"): step = "hotel_awaiting_guest_email"
-                elif not selected_hotel.get("guest_phone"): step = "hotel_awaiting_guest_phone"
-                elif "special_requests" not in selected_hotel: step = "hotel_awaiting_special_requests"
-                elif "arrival_time" not in selected_hotel: step = "hotel_awaiting_arrival_time"
-                else: step = "hotel_summary"
+            if not selected_hotel.get("guest_name"): step = "hotel_awaiting_guest_name"
+            elif not selected_hotel.get("guest_email"): step = "hotel_awaiting_guest_email"
+            elif not selected_hotel.get("guest_phone"): step = "hotel_awaiting_guest_phone"
+            elif "special_requests" not in selected_hotel: step = "hotel_awaiting_special_requests"
+            elif "arrival_time" not in selected_hotel: step = "hotel_awaiting_arrival_time"
+            else: step = "hotel_summary"
             
     elif (
         # FIX H-001/H-003: Never fire flight passenger count logic when inside any hotel step
@@ -780,7 +883,7 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
     elif (
         # FIX H-001/H-003: Never fire flight passenger details logic when inside any hotel step
         not incoming_step.startswith("hotel_") if incoming_step else True
-    ) and not step.startswith("hotel_") and step != "hotel_booking_confirmed" and (
+    ) and not step.startswith("hotel_") and step != "hotel_booking_confirmed" and incoming_step != "verify_passenger_count" and (
         result.intent == "provide_details" or
         (step == "awaiting_passenger_details" and (
             result.intent != "general_qa" or
@@ -790,65 +893,59 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
         result.intent = "provide_details"
         total_pax = passenger_count.get("total") or 1
         
-        if current_passenger_index >= len(passengers_details):
+        while len(passengers_details) <= current_passenger_index:
             passengers_details.append({})
             
         pax = passengers_details[current_passenger_index]
-        errors = []
+        raw_text = user_msg_text.strip()
         
-        if result.passenger_name:
-            name_clean = result.passenger_name.strip()
-            if name_clean.lower() in user_msg_text.lower():
-                if len(name_clean) >= 2:
-                    pax["name"] = name_clean
-                else:
-                    errors.append("Name must be at least 2 characters long.")
+        # Extract fields using deterministic extractor
+        updated_pax, errors = extract_passenger_fields(raw_text, pax)
+        
+        # Fallback to LLM-extracted fields if still missing
+        if not updated_pax.get("name") and result.passenger_name:
+            updated_pax["name"] = result.passenger_name
+        if not updated_pax.get("email") and result.passenger_email:
+            updated_pax["email"] = result.passenger_email
+        if not updated_pax.get("contact") and result.passenger_contact:
+            updated_pax["contact"] = result.passenger_contact
+        if not updated_pax.get("passport") and result.passenger_passport:
+            updated_pax["passport"] = result.passenger_passport
                 
-        if result.passenger_email:
-            email_clean = result.passenger_email.strip()
-            if email_clean.lower() in user_msg_text.lower():
-                if re.match(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$", email_clean):
-                    pax["email"] = email_clean
-                else:
-                    errors.append("Email address is invalid.")
-                
-        if result.passenger_contact:
-            contact_clean = re.sub(r"[^\d+]", "", result.passenger_contact.strip())
-            user_msg_digits = re.sub(r"[^\d+]", "", user_msg_text)
-            if contact_clean in user_msg_digits or result.passenger_contact.strip() in user_msg_text:
-                if re.match(r"^\+?\d{1,4}\d{10}$", contact_clean):
-                    pax["contact"] = contact_clean
-                else:
-                    errors.append("Contact number must include a country code followed strictly by 10 digits (e.g. +919876543210).")
-                
-        if result.passenger_passport:
-            passport_clean = re.sub(r"\s+", "", result.passenger_passport.strip())
-            if passport_clean.lower() in user_msg_text.lower().replace(" ", ""):
-                if len(passport_clean) >= 6 and len(passport_clean) <= 15 and passport_clean.isalnum():
-                    pax["passport"] = passport_clean.upper()
-                else:
-                    errors.append("Passport number must be 6-15 alphanumeric characters.")
+        # Re-run validation on all populated fields
+        errors = []
+        if updated_pax.get("name") and len(updated_pax["name"]) < 2:
+            errors.append("Name must be at least 2 characters long.")
+        if updated_pax.get("email") and not re.match(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$", updated_pax["email"]):
+            errors.append("Email address is invalid.")
+        if updated_pax.get("contact") and not re.match(r"^\+?\d{1,4}\d{10}$", updated_pax["contact"]):
+            errors.append("Contact number must include a country code followed strictly by 10 digits (e.g. +919876543210).")
+        if updated_pax.get("passport") and (len(updated_pax["passport"]) < 6 or len(updated_pax["passport"]) > 15 or not updated_pax["passport"].isalnum()):
+            errors.append("Passport number must be 6-15 alphanumeric characters.")
+            
+        passengers_details[current_passenger_index] = updated_pax
+        pax = updated_pax
         
         if errors:
             pending_clarification = "⚠️ Validation Error:\n" + "\n".join([f"- {err}" for err in errors])
-        else:
-            pending_clarification = None
-        
-        if not pax.get("name") or not pax.get("email") or not pax.get("contact") or not pax.get("passport"):
             step = "awaiting_passenger_details"
         else:
-            current_passenger_index += 1
-            if current_passenger_index >= total_pax:
-                step = "awaiting_payment"
-            else:
+            pending_clarification = None
+            if not pax.get("name") or not pax.get("email") or not pax.get("contact") or not pax.get("passport"):
                 step = "awaiting_passenger_details"
+            else:
+                current_passenger_index += 1
+                if current_passenger_index >= total_pax:
+                    step = "awaiting_payment"
+                else:
+                    step = "awaiting_passenger_details"
                 
     elif result.intent == "payment_done" or user_msg_text.strip().lower() == "payment done":
-        # If we're in a hotel payment flow, skip flight-specific passenger validation
-        is_hotel_payment = step in ["hotel_awaiting_payment", "hotel_summary", "awaiting_payment"] and selected_hotel.get("name")
+        # Check if we are in hotel flow vs flight flow
+        is_hotel_payment = step.startswith("hotel_") or step in ["hotel_awaiting_payment", "hotel_summary"]
         
         if is_hotel_payment:
-            # Hotel payment: just confirm the hotel booking
+            # Hotel payment: confirm the hotel booking
             step = "hotel_booking_confirmed"
         else:
             # Flight payment: validate all passenger details are complete
@@ -1052,7 +1149,7 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
             val = user_msg_text.strip()
             selected_hotel["arrival_time"] = "None" if val.lower() in ["skip", "none", "no"] else val
             
-        if step.startswith("hotel_awaiting_guest_") or step in ["hotel_awaiting_special_requests", "hotel_awaiting_arrival_time", "hotel_summary"]:
+        if incoming_step and (incoming_step.startswith("hotel_awaiting_guest_") or incoming_step in ["hotel_awaiting_special_requests", "hotel_awaiting_arrival_time", "hotel_summary"]):
             if not selected_hotel.get("guest_name"): step = "hotel_awaiting_guest_name"
             elif not selected_hotel.get("guest_email"): step = "hotel_awaiting_guest_email"
             elif not selected_hotel.get("guest_phone"): step = "hotel_awaiting_guest_phone"
@@ -1103,7 +1200,7 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
         else:
             interruption_question = user_msg_text
 
-    elif (result.intent == "book_hotel" or user_msg_text.strip().lower() == "book a hotel") and not is_gathering_details:
+    elif (result.intent == "book_hotel" or user_msg_text.strip().lower() == "book a hotel") and not is_gathering_details and step != "hotel_ready_to_search":
         # FIX H-001: Use pre-extraction snapshots to check for REAL prior flights
         city_already_known = bool(hotel_params.get("city"))
         has_prior_flight = bool(_original_flight_destination or _original_flight_has_airline)
@@ -1121,7 +1218,16 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
             # No prior flight — skip directly to check-in since city is now known
             step = "hotel_awaiting_check_in" if city_already_known else "hotel_awaiting_city"
 
-    elif result.intent == "book_flight" and not is_gathering_details:
+    elif (result.intent == "book_flight" or user_msg_text.strip().lower() in ["book a flight", "book flight", "flight", "fly"]) and not is_gathering_details:
+        # Starting a fresh flight booking:
+        # If flight was already confirmed or previous session had leftover flight params, reset them if no new cities provided in message
+        is_fresh_flight_req = user_msg_text.strip().lower() in ["book a flight", "book flight", "flight", "fly"] or state.get("ticket") is not None
+        if is_fresh_flight_req and not result.origin and not result.destination:
+            flight_params.clear()
+            selected_flight.clear()
+            passengers_details.clear()
+            passenger_count.clear()
+            current_passenger_index = 0
         step = get_next_flight_step(flight_params, invalid_date)
         
     return {
@@ -1138,5 +1244,7 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
         "pending_clarification": pending_clarification,
         "interruption_question": interruption_question,
         "clarification_repeats": state.get("clarification_repeats") or {},
-        "options_to_show": options_to_show
+        "options_to_show": options_to_show,
+        "hotel_ticket": state.get("hotel_ticket"),
+        "temp_new_hotel": state.get("temp_new_hotel")
     }

@@ -60,12 +60,8 @@ def get_hotel_contextual_reminder(step: str, state: Dict[str, Any]) -> str | Non
         return "Do you have any special requests for the stay, or should we skip this?"
     elif step == "hotel_awaiting_arrival_time":
         return "What is your estimated arrival time at the hotel, or would you like to skip this?"
-    elif step == "hotel_summary":
-        return "Please verify the hotel booking details above. If correct, click 'Payment Done' or reply 'Payment done'."
-    elif step == "hotel_awaiting_payment":
+    elif step in ["hotel_awaiting_payment", "hotel_summary"]:
         return f"Please click the 'Proceed to Booking' button above to complete your stay at {selected_hotel.get('name')}, or say 'Payment Done' once finished."
-    elif step == "awaiting_payment":
-        return f"Please click the 'Proceed to Booking' button above to complete your stay at {selected_hotel.get('name')}, or reply 'Payment done' once finished."
     return None
 
 def handle_hotel_clarification(step: str, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -199,7 +195,7 @@ def handle_hotel_clarification(step: str, state: Dict[str, Any]) -> Dict[str, An
         replies = ["Payment Done"]
         options = [{"type": "action_button", "label": "Proceed to Booking", "url": selected_hotel.get("booking_link") or selected_hotel.get("booking_url") or "https://booking.com"}]
         
-    elif step in ["hotel_awaiting_payment", "awaiting_payment"]:
+    elif step == "hotel_awaiting_payment":
         link = selected_hotel.get("booking_link") or selected_hotel.get("booking_url") or "https://booking.com"
         msg = f"Perfect! Let's proceed with booking your stay at {selected_hotel.get('name')}."
         replies = ["Payment Done"]

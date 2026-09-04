@@ -138,7 +138,7 @@ async def chat_endpoint(request: ChatRequest):
             current_flow = "Hotel Booking"
         elif current_step.startswith("itinerary_") or current_step == "plan_itinerary":
             current_flow = "Itinerary Plan"
-        elif current_step in ["awaiting_origin_dest", "awaiting_departure_date", "invalid_departure_date", "awaiting_journey_type", "ready_to_search", "flight_selecting", "awaiting_passenger_count", "verify_passenger_count", "awaiting_passenger_details", "awaiting_payment", "booking_confirmed"]:
+        elif current_step in ["awaiting_origin_dest", "awaiting_departure_date", "invalid_departure_date", "awaiting_journey_type", "ready_to_search", "flight_selecting", "awaiting_passenger_count", "verify_passenger_count", "awaiting_passenger_details", "awaiting_payment", "flight_summary", "flight_awaiting_payment", "booking_confirmed"]:
             current_flow = "Flight Booking"
             
     ticket = new_state.get("ticket") if current_step in ["booking_confirmed", "hotel_booking_confirmed"] else None
@@ -153,9 +153,9 @@ async def chat_endpoint(request: ChatRequest):
     # Write the actual request and response of this turn to a JSON file
     try:
         import json
-        from datetime import datetime
+        from datetime import datetime, timezone
         log_data = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "chatbot_api": {
                 "request": {
                     "message": request.message,

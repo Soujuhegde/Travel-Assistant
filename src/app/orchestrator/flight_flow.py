@@ -22,6 +22,7 @@ def get_flight_contextual_reminder(step: str, state: Dict[str, Any]) -> str | No
     flight_params = state.get("flight_params") or {}
     selected_flight = state.get("selected_flight") or {}
     passenger_count = state.get("passenger_count") or {}
+    passengers_details = state.get("passengers_details") or []
     current_passenger_index = state.get("current_passenger_index") or 0
 
     if step == "awaiting_origin_dest":
@@ -41,9 +42,19 @@ def get_flight_contextual_reminder(step: str, state: Dict[str, Any]) -> str | No
     elif step == "awaiting_passenger_details":
         total_pax = passenger_count.get("total") or 1
         pax_num = current_passenger_index + 1
-        return f"Please provide the passenger details (Name, Email, Phone, Passport) for Passenger {pax_num} of {total_pax} to proceed."
-    elif step == "awaiting_payment":
-        return "Please click the 'Proceed With Booking' button above to book your flight, or reply 'Payment done' once you've completed the payment."
+        pax = passengers_details[current_passenger_index] if current_passenger_index < len(passengers_details) else {}
+        if not pax.get("name"):
+            return f"Please provide the Full Name for Passenger {pax_num} of {total_pax} (as per passport) to proceed."
+        elif not pax.get("email"):
+            return f"Please provide the Email Address for {pax.get('name')} to proceed."
+        elif not pax.get("contact"):
+            return f"Please provide the Contact Number for {pax.get('name')} to proceed."
+        elif not pax.get("passport"):
+            return f"Please provide the Passport Number for {pax.get('name')} to proceed."
+        return f"Please provide the passenger details for Passenger {pax_num} of {total_pax} to proceed."
+    elif step in ["awaiting_payment", "flight_summary", "flight_awaiting_payment"]:
+        airline = selected_flight.get("airline_name") or selected_flight.get("airline") or "your flight"
+        return f"Please click the 'Proceed With Booking' button above to complete booking {airline}, or reply 'Payment done' once you've completed the payment."
     return None
 
 def handle_flight_clarification(step: str, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -97,12 +108,27 @@ def handle_flight_clarification(step: str, state: Dict[str, Any]) -> Dict[str, A
         if not pax.get("passport"): missing.append("Passport No")
         
         total_pax = (state.get("passenger_count") or {}).get("total") or 1
+        pax_label = f"Passenger {pax_idx + 1} of {total_pax}"
+        
         clarification = state.get("pending_clarification")
         prefix = f"{clarification}\n\n" if clarification else ""
-        msg = f"{prefix}Please provide the {', '.join(missing)} for Passenger {pax_idx + 1} of {total_pax} to proceed."
-    elif step == "awaiting_payment":
-        origin = state.get("flight_params", {}).get("origin", "")
-        destination = state.get("flight_params", {}).get("destination", "")
+        
+        if len(missing) == 4:
+            msg = f"{prefix}Please provide the Name, Email, Contact No, Passport No for {pax_label} to proceed."
+        elif not pax.get("name"):
+            msg = f"{prefix}Please enter the Full Name for {pax_label} (as per government ID/passport):"
+        elif not pax.get("email"):
+            msg = f"{prefix}Please enter the Email Address for {pax.get('name')}:"
+        elif not pax.get("contact"):
+            msg = f"{prefix}Please enter the Contact Number for {pax.get('name')} (with country code, e.g. +919876543210):"
+        elif not pax.get("passport"):
+            msg = f"{prefix}Please enter the Passport Number for {pax.get('name')}:"
+        else:
+            msg = f"{prefix}Please provide the {', '.join(missing)} for {pax_label} to proceed."
+            
+    elif step in ["awaiting_payment", "flight_summary", "flight_awaiting_payment"]:
+        origin = state.get("flight_params", {}).get("origin", "Origin")
+        destination = state.get("flight_params", {}).get("destination", "Destination")
         
         base_link = selected_flight.get("booking_link") or "https://flights.google.com"
         if "?" in base_link:
@@ -110,7 +136,32 @@ def handle_flight_clarification(step: str, state: Dict[str, Any]) -> Dict[str, A
         else:
             link = f"{base_link}?origin={origin}&destination={destination}"
             
-        msg = "Perfect! Let's proceed with your booking."
+        airline = selected_flight.get("airline_name") or selected_flight.get("airline") or "Airline"
+        flight_no = selected_flight.get("flight_numbers") or ""
+        flight_class = selected_flight.get("class") or selected_flight.get("flight_class") or "Economy"
+        today_date = datetime.now().strftime("%Y-%m-%d")
+        dep_date = flight_params.get("departure_date", today_date)
+        dep_time = selected_flight.get("departure_time") or "00:00"
+        arr_time = selected_flight.get("arrival_time") or "00:00"
+        
+        raw_price = selected_flight.get('price', 'N/A')
+        flight_nums = selected_flight.get('flight_numbers', '')
+        if raw_price == flight_nums or raw_price == 'N/A':
+            pricing_list = selected_flight.get('pricing', [])
+            raw_price = pricing_list[0].get('price', 'N/A') if pricing_list else 'N/A'
+            
+        total_pax = (state.get("passenger_count") or {}).get("total") or len(passengers_details) or 1
+        try:
+            price_digits = int("".join(filter(str.isdigit, raw_price.split(".")[0])))
+            total_calc = price_digits * total_pax
+            total_price_str = f"₹{total_calc:,}.00"
+        except:
+            total_price_str = raw_price
+            
+        pax_names = [p.get("name", f"Passenger {i+1}") for i, p in enumerate(passengers_details)] if passengers_details else [state.get("passenger_details", {}).get("name", "Passenger 1")]
+        pax_str = ", ".join(pax_names)
+        
+        msg = f"Perfect! Let's proceed with your booking.\n\n📋 Booking Summary\n\n✈️ Flight: {airline} ({flight_no})\n🛫 Route: {origin.upper()} ➔ {destination.upper()}\n📅 Departure Date: {dep_date}\n⏰ Time: {dep_time} - {arr_time}\n💺 Class: {flight_class}\n👥 Passengers ({total_pax}): {pax_str}\n💰 Total Price: {total_price_str}"
         replies = ["Payment done"]
         options = [{"type": "action_button", "label": "Proceed With Booking", "url": link}]
         

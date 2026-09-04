@@ -317,7 +317,7 @@ def test_initial_message_prefilling(mock_llm, mock_serp):
         intent="book_flight",
         origin="BLR",
         destination="DEL",
-        departure_date="2026-08-15"
+        departure_date="2026-10-15"
     )
     
     # Mock the search response
@@ -333,7 +333,7 @@ def test_initial_message_prefilling(mock_llm, mock_serp):
         )
     ]
     
-    response = client.post("/api/chat", json={"session_id": session_id, "message": "Book a flight from BLR to DEL on 2026-08-15"})
+    response = client.post("/api/chat", json={"session_id": session_id, "message": "Book a flight from BLR to DEL on 2026-10-15"})
     assert response.status_code == 200
     data = response.json()
     # It should search flights immediately since all details are prefilled!
@@ -342,4 +342,5 @@ def test_initial_message_prefilling(mock_llm, mock_serp):
     assert len(data["options"]) == 1
     assert data["options"][0]["airline_name"] == "Mock Airlines"
     assert "flight options" in data["message"]
+
 

@@ -18,6 +18,8 @@ class HotelState(TypedDict):
     hotel_params: Dict[str, Any] | None
     hotel_result: Dict[str, Any] | None
     selected_hotel: Dict[str, Any] | None
+    hotel_ticket: Dict[str, Any] | None
+    temp_new_hotel: Dict[str, Any] | None
     hotel_email_sent: Optional[bool]
 
 class CommonState(TypedDict):
