@@ -634,6 +634,17 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
         hotel_params["guests"] = "1 Adult"
         step = "hotel_ready_to_search"
     
+    if any(w in msg_text_lower for w in ["edit date", "edit dates", "change date", "change dates", "modify date", "modify dates", "✏️ edit dates"]):
+        if is_in_hotel_flow or (step and step.startswith("hotel_")):
+            result.intent = "book_hotel"
+            hotel_params["check_in_date"] = None
+            hotel_params["check_out_date"] = None
+            step = "hotel_awaiting_check_in"
+        elif step in ["awaiting_origin_dest", "awaiting_departure_date", "invalid_departure_date", "awaiting_journey_type", "ready_to_search", "flight_selecting", "flight_summary", "awaiting_payment", "flight_awaiting_payment"]:
+            result.intent = "book_flight"
+            flight_params["departure_date"] = None
+            step = "awaiting_departure_date"
+
     _itinerary_steps = {"itinerary_awaiting_city", "itinerary_awaiting_start_date", "itinerary_awaiting_days", "plan_itinerary"}
     if any(w in msg_text_lower for w in ["plan an itinerary", "plan itinerary", "itinerary plan", "itinerary", "itineary", "plan an itineary", "plan itineary", "itineary plan"]) and step not in _itinerary_steps:
         result.intent = "plan_itinerary"
