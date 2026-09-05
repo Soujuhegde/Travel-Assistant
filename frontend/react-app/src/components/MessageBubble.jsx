@@ -3,6 +3,8 @@ import { Plane, Hotel, CheckCircle, ChevronRight } from 'lucide-react';
 import FlightTicket from './FlightTicket';
 import HotelCard from './HotelCard';
 import HotelTicket from './HotelTicket';
+import PaymentCheckoutCard from './PaymentCheckoutCard';
+import UpsellOfferCard from './UpsellOfferCard';
 
 const formatDuration = (dur) => {
   if (!dur) return "";
@@ -26,16 +28,29 @@ const formatDuration = (dur) => {
 };
 
 const FlightCard = ({ option }) => {
+  const isRoundTrip = option.journey_type === "Round Trip" || Boolean(option.return_date);
+
   return (
     <div className="bg-white border border-slate-100 rounded-3xl p-5 my-2 shadow-sm mb-4">
-      <div className="font-bold text-slate-800 text-lg mb-4 flex items-center gap-3">
-        {option.airline_logo && <img src={option.airline_logo} alt={option.airline_name} className="w-6 h-6 object-contain" />}
-        {option.airline_name} - {option.flight_numbers}
+      <div className="flex justify-between items-start mb-4 gap-2">
+        <div className="font-bold text-slate-800 text-lg flex items-center gap-3">
+          {option.airline_logo && <img src={option.airline_logo} alt={option.airline_name} className="w-6 h-6 object-contain" />}
+          <span>{option.airline_name} - {option.flight_numbers}</span>
+        </div>
+        {isRoundTrip && (
+          <span className="px-2.5 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200/80 rounded-full text-xs font-extrabold whitespace-nowrap flex-shrink-0">
+            🔁 Round Trip
+          </span>
+        )}
       </div>
       
       <div className="flex justify-between text-sm text-slate-500 font-medium mb-1">
-        <span>{option.departure_date}</span>
-        <span>{option.arrival_date}</span>
+        <span>Outbound: {option.departure_date}</span>
+        {isRoundTrip && option.return_date ? (
+          <span className="text-indigo-600 font-bold">Return: {option.return_date}</span>
+        ) : (
+          <span>{option.arrival_date}</span>
+        )}
       </div>
       
       <div className="flex justify-between items-center mb-1">
@@ -374,7 +389,7 @@ const ItineraryTimeline = ({ text, isUser }) => {
   );
 };
 
-const MessageBubble = ({ message, onQuickReply, onOptionSelect }) => {
+const MessageBubble = ({ message, onQuickReply, onOptionSelect, onPay, onUpsellPay, onUpsellDecline }) => {
   const isUser = message.sender === 'user';
   const hasItinerary = !isUser && parseItinerary(message.text);
 
@@ -430,6 +445,16 @@ const MessageBubble = ({ message, onQuickReply, onOptionSelect }) => {
           </div>
         )}
 
+        {/* Razorpay Payment Checkout Card */}
+        {message.payment_details && (
+          <div className="mt-4 w-full">
+            <PaymentCheckoutCard 
+              paymentDetails={message.payment_details} 
+              onPay={onPay} 
+            />
+          </div>
+        )}
+
         {/* Flight Ticket */}
         {message.ticket && !message.ticket.hotel_name && (
           <div className="mt-4 w-full">
@@ -441,6 +466,17 @@ const MessageBubble = ({ message, onQuickReply, onOptionSelect }) => {
         {message.ticket && message.ticket.hotel_name && (
           <div className="mt-4 w-full">
             <HotelTicket ticket={message.ticket} />
+          </div>
+        )}
+
+        {/* Post-Booking Upsell Card */}
+        {message.upsell_details && (
+          <div className="mt-4 w-full">
+            <UpsellOfferCard 
+              upsellDetails={message.upsell_details} 
+              onAccept={onUpsellPay} 
+              onDecline={onUpsellDecline} 
+            />
           </div>
         )}
 

@@ -76,6 +76,11 @@ const SingleBoardingPass = ({ ticket, passengerName, passengerIndex, seat }) => 
             <span className="px-4 py-1 bg-[#4a81e3] text-white text-xs font-bold uppercase tracking-wider rounded">
               {ticket.flight_class}
             </span>
+            {(ticket.journey_type === "Round Trip" || ticket.return_date) && (
+              <span className="px-3 py-1 bg-emerald-600 text-white text-[11px] font-black uppercase tracking-wider rounded text-center shadow-sm">
+                ROUND TRIP 🔁
+              </span>
+            )}
             <span className="px-4 py-1 bg-[#4a81e3] text-white text-xs font-bold uppercase tracking-wider rounded text-center">
               GROUP {ticket.group}
             </span>
@@ -115,10 +120,16 @@ const SingleBoardingPass = ({ ticket, passengerName, passengerIndex, seat }) => 
               <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold mb-1">Passenger</p>
               <p className="font-bold text-gray-800 text-sm whitespace-nowrap">{passengerName}</p>
             </div>
-            <div className="col-span-2">
-              <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold mb-1">Date</p>
+            <div className={ticket.return_date ? "col-span-1" : "col-span-2"}>
+              <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold mb-1">Outbound</p>
               <p className="font-bold text-gray-800 text-sm">{displayDate}</p>
             </div>
+            {ticket.return_date && (
+              <div className="col-span-1">
+                <p className="text-[10px] text-emerald-600 uppercase tracking-widest font-bold mb-1">Return</p>
+                <p className="font-bold text-[#204996] text-sm">{ticket.return_date}</p>
+              </div>
+            )}
             <div>
               <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold mb-1">Gate</p>
               <p className="font-bold text-gray-800 text-sm">{ticket.gate}</p>
@@ -145,6 +156,13 @@ const SingleBoardingPass = ({ ticket, passengerName, passengerIndex, seat }) => 
             </div>
           </div>
         </div>
+
+        {ticket.add_on && (
+          <div className="mt-3 px-3 py-1.5 bg-amber-50 border border-amber-200/80 rounded-lg flex items-center gap-2 text-xs font-bold text-amber-900 animate-fade-in-up">
+            <span>✨</span>
+            <span>{ticket.add_on}</span>
+          </div>
+        )}
       </div>
 
       {/* Dashed Separator */}

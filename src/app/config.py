@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     BREVO_SENDER_EMAIL: str = "bookings@sarachotbot.local"
     SARVAM_API_KEY: str = ""
     
+    # Razorpay Payment Gateway configuration
+    RAZORPAY_KEY_ID: str = ""
+    RAZORPAY_KEY_SECRET: str = ""
+    
     # Optional parameters
     LLM_MODEL: str = "llama-3.1-8b-instant"
     

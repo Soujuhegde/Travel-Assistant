@@ -23,7 +23,7 @@ def get_contextual_booking_reminder(step, state):
     if not step:
         return None
     # Check flight steps
-    if step in ["awaiting_origin_dest", "awaiting_departure_date", "invalid_departure_date", "awaiting_journey_type", "flight_selecting", "awaiting_passenger_count", "verify_passenger_count", "awaiting_passenger_details", "awaiting_payment", "flight_awaiting_payment"]:
+    if step in ["awaiting_origin_dest", "awaiting_departure_date", "invalid_departure_date", "awaiting_journey_type", "awaiting_return_date", "invalid_return_date", "flight_selecting", "awaiting_passenger_count", "verify_passenger_count", "awaiting_passenger_details", "awaiting_payment", "flight_awaiting_payment"]:
         return get_flight_contextual_reminder(step, state)
     # Check hotel steps
     elif step.startswith("hotel_") or step == "hotel_summary":
@@ -222,7 +222,7 @@ Guidelines:
         
         replies = ["Book a Flight", "Book a Hotel", "Plan an Itinerary"]
         res_data = {"final_response": msg, "quick_replies": replies, "options_to_show": []}
-    elif step in ["awaiting_origin_dest", "invalid_departure_date", "awaiting_departure_date", "awaiting_journey_type", "flight_selecting", "awaiting_passenger_count", "verify_passenger_count", "awaiting_passenger_details", "awaiting_payment", "flight_awaiting_payment", "booking_confirmed"]:
+    elif step in ["awaiting_origin_dest", "invalid_departure_date", "awaiting_departure_date", "awaiting_journey_type", "awaiting_return_date", "invalid_return_date", "flight_selecting", "awaiting_passenger_count", "verify_passenger_count", "awaiting_passenger_details", "awaiting_payment", "flight_awaiting_payment", "booking_confirmed"]:
         res_data = handle_flight_clarification(step, state)
     elif step and (step.startswith("hotel_") or step in ["hotel_booking_confirmed", "hotel_summary"]):
         res_data = handle_hotel_clarification(step, state)

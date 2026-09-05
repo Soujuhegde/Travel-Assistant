@@ -131,6 +131,9 @@ def search_node(state: FlightAgentState) -> Dict[str, Any]:
     origin = sanitize_iata_code(params.get("origin"))
     destination = sanitize_iata_code(params.get("destination"))
     departure_date = params.get("departure_date")
+    journey_type = params.get("journey_type", "One Way")
+    return_date = params.get("return_date")
+    is_round_trip = journey_type == "Round Trip" and bool(return_date)
     
     api_key = os.getenv("SERPAPI_API_KEY")
     results = []
@@ -147,9 +150,11 @@ def search_node(state: FlightAgentState) -> Dict[str, Any]:
                 "outbound_date": departure_date,
                 "currency": "INR",
                 "hl": "en",
-                "type": "2",
+                "type": "1" if is_round_trip else "2",
                 "api_key": api_key
             }
+            if is_round_trip:
+                req_params["return_date"] = return_date
             
             serpapi_request_info = {
                 "url": url,
@@ -159,7 +164,7 @@ def search_node(state: FlightAgentState) -> Dict[str, Any]:
             cached_data = get_cached_response("google_flights", req_params)
             if cached_data:
                 data = cached_data
-                print(f"Retrieving flight search results from cache for {origin} -> {destination}")
+                print(f"Retrieving flight search results from cache for {origin} -> {destination} ({journey_type})")
             else:
                 response = httpx.get(url, params=req_params, timeout=15.0)
                 response.raise_for_status()
@@ -339,6 +344,8 @@ def search_node(state: FlightAgentState) -> Dict[str, Any]:
                     "flight_numbers": flight_number,
                     "departure_date": format_date(dep_time_raw) if dep_time_raw else params.get("departure_date"),
                     "arrival_date": format_date(arr_time_raw) if arr_time_raw else params.get("departure_date"),
+                    "return_date": params.get("return_date"),
+                    "journey_type": params.get("journey_type", "One Way"),
                     "departure_time": format_time(dep_time_raw) if dep_time_raw else "00:00",
                     "arrival_time": format_time(arr_time_raw) if arr_time_raw else "00:00",
                     "origin_airport": f"{dep.get('name', 'Origin')} ({dep.get('id', origin)})",

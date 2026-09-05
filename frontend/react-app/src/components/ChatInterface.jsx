@@ -67,7 +67,9 @@ const ChatInterface = ({ onFlowChange }) => {
         text: response.data.message,
         options: response.data.followup_message ? [] : response.data.options,  // no options on decline msg
         quick_replies: response.data.followup_message ? [] : response.data.quick_replies,
-        ticket: response.data.ticket
+        ticket: response.data.ticket,
+        payment_details: response.data.payment_details,
+        upsell_details: response.data.upsell_details
       };
 
       setMessages(prev => [...prev, botMessage]);
@@ -98,6 +100,149 @@ const ChatInterface = ({ onFlowChange }) => {
     } finally {
       setIsTyping(false);
     }
+  };
+
+  const handleRazorpayCheckout = (paymentDetails) => {
+    if (!window.Razorpay) {
+      alert("Razorpay payment gateway SDK is loading. Please check your internet connection.");
+      return;
+    }
+
+    const options = {
+      key: paymentDetails.key_id,
+      amount: paymentDetails.amount,
+      currency: paymentDetails.currency || 'INR',
+      name: 'Sara Travel Assistant',
+      description: paymentDetails.item_name || 'Travel Booking Checkout',
+      order_id: paymentDetails.order_id,
+      prefill: {
+        email: paymentDetails.customer_email || 'traveler@example.com',
+        contact: paymentDetails.customer_phone || '9876543210'
+      },
+      notes: {
+        session_id: sessionId,
+        booking_type: paymentDetails.booking_type || 'travel'
+      },
+      theme: {
+        color: '#004e92'
+      },
+      handler: async function (res) {
+        setIsTyping(true);
+        try {
+          const verifyRes = await axios.post('http://localhost:8000/api/payment/verify', {
+            session_id: sessionId,
+            razorpay_order_id: res.razorpay_order_id,
+            razorpay_payment_id: res.razorpay_payment_id,
+            razorpay_signature: res.razorpay_signature,
+            is_upsell: false
+          });
+
+          const botMessage = {
+            id: Date.now() + 1,
+            sender: 'bot',
+            text: verifyRes.data.message || "🎉 Payment confirmed! Your booking is complete and your ticket has been emailed to you.",
+            ticket: verifyRes.data.ticket,
+            upsell_details: verifyRes.data.upsell_details,
+            quick_replies: ["Book another flight", "Book a hotel", "Plan an itinerary"]
+          };
+          setMessages(prev => [...prev, botMessage]);
+        } catch (err) {
+          console.error("Payment verification failed:", err);
+          setMessages(prev => [...prev, {
+            id: Date.now() + 1,
+            sender: 'bot',
+            text: "⚠️ Payment verification encountered an issue. Please check your dashboard or contact support."
+          }]);
+        } finally {
+          setIsTyping(false);
+        }
+      },
+      modal: {
+        ondismiss: async function () {
+          try {
+            await axios.post('http://localhost:8000/api/payment/failure', {
+              session_id: sessionId,
+              order_id: paymentDetails.order_id,
+              error_code: 'MODAL_DISMISSED',
+              error_description: 'User dismissed Razorpay checkout modal'
+            });
+          } catch (e) {}
+        }
+      }
+    };
+
+    const rzp = new window.Razorpay(options);
+    rzp.on('payment.failed', async function (response) {
+      try {
+        await axios.post('http://localhost:8000/api/payment/failure', {
+          session_id: sessionId,
+          order_id: response.error?.metadata?.order_id || paymentDetails.order_id,
+          error_code: response.error?.code || 'PAYMENT_FAILED',
+          error_description: response.error?.description || 'Payment failed'
+        });
+      } catch (e) {}
+    });
+    rzp.open();
+  };
+
+  const handleUpsellCheckout = (upsellDetails) => {
+    if (!window.Razorpay) {
+      alert("Razorpay payment gateway SDK is loading.");
+      return;
+    }
+
+    const options = {
+      key: upsellDetails.key_id,
+      amount: Math.round((upsellDetails.price_rupees || 499) * 100),
+      currency: 'INR',
+      name: 'Sara Travel Add-on',
+      description: upsellDetails.title,
+      order_id: upsellDetails.order_id,
+      theme: {
+        color: '#d97706'
+      },
+      handler: async function (res) {
+        setIsTyping(true);
+        try {
+          const verifyRes = await axios.post('http://localhost:8000/api/payment/verify', {
+            session_id: sessionId,
+            razorpay_order_id: res.razorpay_order_id,
+            razorpay_payment_id: res.razorpay_payment_id,
+            razorpay_signature: res.razorpay_signature,
+            is_upsell: true,
+            upsell_type: upsellDetails.category
+          });
+
+          // Update previous ticket to display add-on
+          setMessages(prev => prev.map(m => {
+            if (m.ticket) {
+              return { ...m, ticket: verifyRes.data.ticket, upsell_details: null };
+            }
+            return m;
+          }));
+
+          const botMessage = {
+            id: Date.now() + 1,
+            sender: 'bot',
+            text: `✨ Fantastic! ${upsellDetails.title} has been confirmed and attached to your booking.`,
+            ticket: verifyRes.data.ticket,
+            quick_replies: ["Book another flight", "Book a hotel", "Plan an itinerary"]
+          };
+          setMessages(prev => [...prev, botMessage]);
+        } catch (err) {
+          console.error("Upsell verification failed:", err);
+        } finally {
+          setIsTyping(false);
+        }
+      }
+    };
+
+    const rzp = new window.Razorpay(options);
+    rzp.open();
+  };
+
+  const handleUpsellDecline = () => {
+    setMessages(prev => prev.map(m => ({ ...m, upsell_details: null })));
   };
 
   const handleMenuOption = async (option) => {
@@ -136,7 +281,9 @@ const ChatInterface = ({ onFlowChange }) => {
         text: response.data.message,
         options: response.data.options,
         quick_replies: response.data.quick_replies,
-        ticket: response.data.ticket
+        ticket: response.data.ticket,
+        payment_details: response.data.payment_details,
+        upsell_details: response.data.upsell_details
       };
 
       setMessages([botMessage]);
@@ -267,6 +414,9 @@ const ChatInterface = ({ onFlowChange }) => {
                 sendMessage(`I would like to select ${flightClass} class on ${option.airline_name} ${option.flight_numbers} for ${price}`);
               }
             }}
+            onPay={handleRazorpayCheckout}
+            onUpsellPay={handleUpsellCheckout}
+            onUpsellDecline={handleUpsellDecline}
           />
         ))}
         {isTyping && (

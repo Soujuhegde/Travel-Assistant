@@ -108,6 +108,13 @@ const HotelTicket = ({ ticket }) => {
           </div>
         </div>
 
+        {ticket.add_on && (
+          <div className="mb-3 px-3.5 py-2 bg-amber-50 border border-amber-200/80 rounded-xl flex items-center gap-2 text-xs font-bold text-amber-900 animate-fade-in-up">
+            <span>✨</span>
+            <span>{ticket.add_on}</span>
+          </div>
+        )}
+
         {/* Booked Button */}
         <div className="flex justify-end mt-2">
           <button 

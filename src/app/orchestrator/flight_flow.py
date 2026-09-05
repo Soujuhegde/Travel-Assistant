@@ -6,7 +6,7 @@ from typing import Dict, Any, List
 from app.schemas.chat import TaskRequest
 from app.agents.flight_agent import call_flight_agent
 
-def get_next_flight_step(flight_params: Dict[str, Any], invalid_date: bool = False) -> str:
+def get_next_flight_step(flight_params: Dict[str, Any], invalid_date: bool = False, invalid_return_date: bool = False) -> str:
     if not flight_params.get("origin") or not flight_params.get("destination"):
         return "awaiting_origin_dest"
     elif invalid_date:
@@ -15,6 +15,13 @@ def get_next_flight_step(flight_params: Dict[str, Any], invalid_date: bool = Fal
         return "awaiting_departure_date"
     elif not flight_params.get("journey_type"):
         return "awaiting_journey_type"
+    elif flight_params.get("journey_type") == "Round Trip":
+        if invalid_return_date:
+            return "invalid_return_date"
+        elif not flight_params.get("return_date"):
+            return "awaiting_return_date"
+        else:
+            return "ready_to_search"
     else:
         return "ready_to_search"
 
@@ -33,6 +40,10 @@ def get_flight_contextual_reminder(step: str, state: Dict[str, Any]) -> str | No
         return "Please enter a valid present or future date to proceed with your booking."
     elif step == "awaiting_journey_type":
         return "To proceed, are you planning a one-way or round trip journey?"
+    elif step == "awaiting_return_date":
+        return "Could you please provide your return date (e.g. 'next Sunday' or 'in 5 days') for the round trip?"
+    elif step == "invalid_return_date":
+        return "Please enter a valid return date that is on or after your departure date."
     elif step == "flight_selecting":
         return "Please select one of the suggested flight options above to proceed, or let me know if you would like to see more options."
     elif step == "awaiting_passenger_count":
@@ -80,6 +91,12 @@ def handle_flight_clarification(step: str, state: Dict[str, Any]) -> Dict[str, A
     elif step == "awaiting_journey_type":
         msg = "Are you planning a one-way or return journey?"
         replies = ["One Way", "Round Trip"]
+    elif step == "awaiting_return_date":
+        msg = "When are you returning? You can say \"in 3 days,\" \"next Sunday,\" or enter any specific return date."
+        replies = ["In 3 days", "In 5 days", "In 1 week"]
+    elif step == "invalid_return_date":
+        msg = "Oops! Your return date cannot be before your departure date. When would you like to return?"
+        replies = ["In 3 days", "In 5 days", "In 1 week"]
     elif step == "flight_selecting":
         options_to_show = state.get("options_to_show") or []
         if len(options_to_show) == 1:
@@ -141,6 +158,8 @@ def handle_flight_clarification(step: str, state: Dict[str, Any]) -> Dict[str, A
         flight_class = selected_flight.get("class") or selected_flight.get("flight_class") or "Economy"
         today_date = datetime.now().strftime("%Y-%m-%d")
         dep_date = flight_params.get("departure_date", today_date)
+        return_date = flight_params.get("return_date")
+        journey_type = flight_params.get("journey_type", "One Way")
         dep_time = selected_flight.get("departure_time") or "00:00"
         arr_time = selected_flight.get("arrival_time") or "00:00"
         
@@ -161,7 +180,10 @@ def handle_flight_clarification(step: str, state: Dict[str, Any]) -> Dict[str, A
         pax_names = [p.get("name", f"Passenger {i+1}") for i, p in enumerate(passengers_details)] if passengers_details else [state.get("passenger_details", {}).get("name", "Passenger 1")]
         pax_str = ", ".join(pax_names)
         
-        msg = f"Perfect! Let's proceed with your booking.\n\n📋 Booking Summary\n\n✈️ Flight: {airline} ({flight_no})\n🛫 Route: {origin.upper()} ➔ {destination.upper()}\n📅 Departure Date: {dep_date}\n⏰ Time: {dep_time} - {arr_time}\n💺 Class: {flight_class}\n👥 Passengers ({total_pax}): {pax_str}\n💰 Total Price: {total_price_str}"
+        trip_label = "Round Trip 🔁" if journey_type == "Round Trip" else "One Way ➡️"
+        date_line = f"📅 Outbound Date: {dep_date}\n🔄 Return Date: {return_date}" if journey_type == "Round Trip" and return_date else f"📅 Departure Date: {dep_date}"
+        
+        msg = f"Perfect! Let's proceed with your booking.\n\n📋 Booking Summary ({trip_label})\n\n✈️ Flight: {airline} ({flight_no})\n🛫 Route: {origin.upper()} ➔ {destination.upper()}\n{date_line}\n⏰ Outbound Time: {dep_time} - {arr_time}\n💺 Class: {flight_class}\n👥 Passengers ({total_pax}): {pax_str}\n💰 Total Price: {total_price_str}"
         replies = ["Payment done"]
         options = [{"type": "action_button", "label": "Proceed With Booking", "url": link}]
         
@@ -176,12 +198,13 @@ def handle_flight_clarification(step: str, state: Dict[str, Any]) -> Dict[str, A
         destination = state.get("flight_params", {}).get("destination", "Destination")
         today_date = datetime.now().strftime("%A, %Y-%m-%d")
         date = state.get("flight_params", {}).get("departure_date", today_date)
+        return_date = state.get("flight_params", {}).get("return_date")
+        journey_type = state.get("flight_params", {}).get("journey_type", "One Way")
         
-        # FIX F-001: Ensure price field is the actual monetary value, not the flight number
+        # Ensure price field is the actual monetary value
         raw_price = selected_flight.get('price', 'N/A')
         flight_nums = selected_flight.get('flight_numbers', '')
         if raw_price == flight_nums or raw_price == 'N/A':
-            # Fall back to pricing list
             pricing_list = selected_flight.get('pricing', [])
             raw_price = pricing_list[0].get('price', 'N/A') if pricing_list else 'N/A'
         
@@ -192,8 +215,10 @@ def handle_flight_clarification(step: str, state: Dict[str, Any]) -> Dict[str, A
             "airline": selected_flight.get('airline_name', selected_flight.get('airline', 'N/A')),
             "flight_numbers": selected_flight.get('flight_numbers', 'N/A'),
             "flight_class": flight_class,
+            "journey_type": journey_type,
             "price": raw_price,
             "date": date,
+            "return_date": return_date,
             "origin": origin.upper(),
             "destination": destination.upper(),
             "origin_full": selected_flight.get("origin_airport", origin.upper()),

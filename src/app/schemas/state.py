@@ -22,6 +22,17 @@ class HotelState(TypedDict):
     temp_new_hotel: Dict[str, Any] | None
     hotel_email_sent: Optional[bool]
 
+class PaymentAndUpsellState(TypedDict):
+    payment_order_id: Optional[str]
+    payment_id: Optional[str]
+    payment_status: Optional[str]  # "pending", "verified", "failed"
+    payment_amount_rupees: Optional[float]
+    payment_details: Optional[Dict[str, Any]]
+    upsell_offer: Optional[Dict[str, Any]]
+    upsell_accepted: Optional[bool]
+    upsell_payment_id: Optional[str]
+    abandonment_email_sent: Optional[bool]
+
 class CommonState(TypedDict):
     messages: List[BaseMessage]
     session_id: str
@@ -39,5 +50,5 @@ class CommonState(TypedDict):
     followup_quick_replies: List[str] | None
     serpapi_calls: List[Dict[str, Any]] | None
 
-class ConversationState(CommonState, FlightState, HotelState):
+class ConversationState(CommonState, FlightState, HotelState, PaymentAndUpsellState):
     pass

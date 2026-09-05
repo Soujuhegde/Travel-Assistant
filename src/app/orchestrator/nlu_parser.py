@@ -13,6 +13,7 @@ class ExtractedInfo(BaseModel):
     origin: str | None = Field(description="The 3-letter IATA code of the origin city or airport (e.g. 'BLR', 'DEL', 'JFK', 'TYO'). ALWAYS convert full city or country names to their primary 3-letter IATA code.", default=None)
     destination: str | None = Field(description="The 3-letter IATA code of the destination city or airport (e.g. 'BLR', 'DEL', 'JFK', 'TYO'). ALWAYS convert full city or country names to their primary 3-letter IATA code.", default=None)
     departure_date: str | None = None
+    return_date: str | None = None
     limit: int | None = Field(description="The number of flights the user wants to see, if they explicitly mention a number (e.g. 'show me 5 flights').", default=None)
     journey_type: Literal["One Way", "Round Trip"] | None = Field(description="The type of journey. ONLY populate this if the user explicitly mentions 'one way', 'round trip', 'return', 'single ticket', etc. Otherwise, set to null.", default=None)
     selected_class: str | None = None
@@ -595,7 +596,6 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
             pass
     
     # Only accept departure_date when we are at a flight detail-gathering step or at the start.
-    # Prevents pre-filling from initial messages only if they are not flight intents, but we allow them now.
     _date_accepting_steps = {"awaiting_departure_date", "invalid_departure_date", "awaiting_origin_dest", "start", "general_qa", None}
     invalid_date = False
     if result.departure_date and step in _date_accepting_steps:
@@ -610,9 +610,45 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
             flight_params["departure_date"] = result.departure_date
 
     # Accept journey_type when inside the flight flow or from the initial message
-    _journey_accepting_steps = {"awaiting_origin_dest", "awaiting_departure_date", "invalid_departure_date", "awaiting_journey_type", "start", "general_qa", None}
+    _journey_accepting_steps = {"awaiting_origin_dest", "awaiting_departure_date", "invalid_departure_date", "awaiting_journey_type", "awaiting_return_date", "invalid_return_date", "start", "general_qa", None}
     if result.journey_type and step in _journey_accepting_steps:
         flight_params["journey_type"] = result.journey_type
+
+    # Accept return_date for Round Trip
+    _return_accepting_steps = {"awaiting_return_date", "invalid_return_date", "awaiting_journey_type", "awaiting_departure_date", "start", "general_qa", None}
+    invalid_return_date = False
+    
+    # Check relative return date phrases (e.g. "in 3 days", "in 1 week", "tomorrow")
+    if step in ["awaiting_return_date", "invalid_return_date"] or (flight_params.get("journey_type") == "Round Trip" and not flight_params.get("return_date")):
+        dep_date_str = flight_params.get("departure_date") or _original_departure_date or datetime.now().strftime("%Y-%m-%d")
+        try:
+            dep_dt = datetime.strptime(dep_date_str, "%Y-%m-%d").date()
+        except:
+            dep_dt = datetime.now().date()
+            
+        rel_days = re.search(r"\b(?:in\s+)?(\d+)\s*(?:day|days|night|nights)\b", msg_text_lower)
+        rel_weeks = re.search(r"\b(?:in\s+)?(\d+)\s*(?:week|weeks)\b", msg_text_lower)
+        if rel_days:
+            result.return_date = (dep_dt + timedelta(days=int(rel_days.group(1)))).strftime("%Y-%m-%d")
+        elif rel_weeks:
+            result.return_date = (dep_dt + timedelta(days=int(rel_weeks.group(1)) * 7)).strftime("%Y-%m-%d")
+        elif "tomorrow" in msg_text_lower and step in ["awaiting_return_date", "invalid_return_date"]:
+            result.return_date = (dep_dt + timedelta(days=1)).strftime("%Y-%m-%d")
+        elif not result.return_date and result.departure_date and step in ["awaiting_return_date", "invalid_return_date"]:
+            result.return_date = result.departure_date
+
+    if result.return_date and (step in _return_accepting_steps or flight_params.get("journey_type") == "Round Trip"):
+        try:
+            r_obj = datetime.strptime(result.return_date, "%Y-%m-%d").date()
+            dep_str = flight_params.get("departure_date") or _original_departure_date or datetime.now().strftime("%Y-%m-%d")
+            dep_obj = datetime.strptime(dep_str, "%Y-%m-%d").date()
+            if r_obj < dep_obj:
+                flight_params["return_date"] = None
+                invalid_return_date = True
+            else:
+                flight_params["return_date"] = result.return_date
+        except ValueError:
+            flight_params["return_date"] = result.return_date
     
     step = state.get("current_step", "start")
     incoming_step = step
@@ -841,8 +877,8 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
                 pending_clarification = "⚠️ Validation Error:\n- Please enter a valid number of days (e.g. 3 or '5 days')."
         else:
             pass
-    elif step in ["awaiting_origin_dest", "awaiting_departure_date", "invalid_departure_date", "awaiting_journey_type"]:
-        step = get_next_flight_step(flight_params, invalid_date)
+    elif step in ["awaiting_origin_dest", "awaiting_departure_date", "invalid_departure_date", "awaiting_journey_type", "awaiting_return_date", "invalid_return_date"]:
+        step = get_next_flight_step(flight_params, invalid_date, invalid_return_date)
     elif step != "verify_passenger_count" and result.intent == "select_flight":
         is_button_select = user_msg_text.startswith("I would like to select ")
         if result.selected_airline and not is_button_select: selected_flight["airline"] = result.selected_airline
@@ -1197,8 +1233,9 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
             is_providing_parameter = True
         elif incoming_step in ["awaiting_departure_date", "hotel_awaiting_check_in", "hotel_awaiting_check_out"] and (result.departure_date or result.check_in_date or result.check_out_date or (user_msg_text.strip() and not is_q)):
             is_providing_parameter = True
-        elif incoming_step == "awaiting_journey_type" and (result.journey_type or (user_msg_text.strip() and not is_q)):
+        elif incoming_step in ["awaiting_journey_type", "awaiting_return_date", "invalid_return_date"] and (result.journey_type or result.return_date or (user_msg_text.strip() and not is_q)):
             is_providing_parameter = True
+            step = get_next_flight_step(flight_params, invalid_date, invalid_return_date)
         elif incoming_step in ["awaiting_passenger_count"] and (result.adults_count or result.children_count or result.infants_count or (user_msg_text.strip() and not is_q)):
             is_providing_parameter = True
         elif incoming_step == "itinerary_awaiting_days":
