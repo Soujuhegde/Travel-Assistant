@@ -56,44 +56,42 @@ travel-chatbot/
 ├── frontend/
 │   └── react-app/
 │       ├── src/
-│       │   ├── components/       # UI components (ChatInterface, Ticket, Cards, Bubbles)
-│       │   ├── utils/            # Frontend helper utilities
-│       │   ├── main.jsx          # React app mounter
-│       │   ├── App.jsx           # Main page structure mounter
-│       │   └── index.css         # Main stylesheet with Tailwind directives
+│       │   ├── components/       # UI components (ChatInterface, MessageBubble, Tickets, Checkout & Upsell Cards)
+│       │   ├── App.jsx           # Main page layout container
+│       │   ├── main.jsx          # React app DOM mounter
+│       │   └── index.css         # Styling system & Tailwind directives
 │       ├── tailwind.config.js    # Design system configurations
-│       └── package.json          # Node dependencies
+│       └── package.json          # Frontend dependencies
 ├── src/
-│   ├── app/
-│   │   ├── agents/
-│   │   │   ├── flight_agent.py   # Flight Agent LangGraph StateGraph (validate, search, format nodes)
-│   │   │   └── hotel_agent.py    # Hotel Agent LangGraph StateGraph (validate, search, format nodes)
-│   │   ├── api/
-│   │   │   └── routes.py         # /api/chat FastAPI endpoint and session cache loader
-│   │   ├── db/
-│   │   │   ├── checkpointer.py   # SQLite StateGraph checkpointer config
-│   │   │   └── database.py       # Pydantic base settings DB setup
-│   │   ├── orchestrator/
-│   │   │   ├── graph.py          # Orchestrator StateGraph definitions and interruption handlers
-│   │   │   ├── nlu_parser.py     # Groq LLM parsing, entity extractions, date validations
-│   │   │   ├── flight_flow.py    # Flight sequence logic and ticket compiler
-│   │   │   ├── hotel_flow.py     # Hotel sequence logic and summary invoice compiler
-│   │   │   └── itinerary_flow.py # Luxury day-by-day planner prompt instructions
-│   │   ├── schemas/
-│   │   │   ├── chat.py           # Pydantic JSON request/response models
-│   │   │   └── state.py          # State schemas (FlightState, HotelState, CommonState, ConversationState)
-│   │   ├── services/
-│   │   │   └── email_service.py  # Dispatches transactional booking confirmations (Brevo)
-│   │   ├── utils/
-│   │   │   ├── cache.py          # SerpAPI caching engine (TTL/parameter normalization)
-│   │   │   └── mock_data.py      # Fallback database listings
-│   │   └── main.py               # Main entrance server script
-│   └── tests/
-│       ├── test_cache.py         # Unit tests for TTL and cache key normalization
-│       ├── test_chat.py          # Integration test suite for chat flows
-│       └── test_hotel_fixes.py   # Unit tests for relative checkout and price parsing
+│   └── app/
+│       ├── agents/
+│       │   ├── flight_agent.py   # Flight Agent LangGraph StateGraph (validate, search, format nodes)
+│       │   └── hotel_agent.py    # Hotel Agent LangGraph StateGraph (validate, search, format nodes)
+│       ├── api/
+│       │   └── routes.py         # FastAPI endpoints (/chat, /payment, /task, MCP tools)
+│       ├── db/
+│       │   ├── checkpointer.py   # StateGraph memory checkpointer
+│       │   └── database.py       # Persistence database setup
+│       ├── orchestrator/
+│       │   ├── graph.py          # Orchestrator StateGraph definitions and interruption handlers
+│       │   ├── nlu_parser.py     # Groq LLM parsing, entity extractions, date validations
+│       │   ├── flight_flow.py    # Flight sequence logic and ticket compiler
+│       │   ├── hotel_flow.py     # Hotel sequence logic and summary invoice compiler
+│       │   └── itinerary_flow.py # Luxury day-by-day planner prompt instructions
+│       ├── schemas/
+│       │   ├── chat.py           # Pydantic JSON request/response models
+│       │   └── state.py          # State schemas (FlightState, HotelState, CommonState, ConversationState)
+│       ├── services/
+│       │   ├── audit_service.py  # Audit trail logger with structured event tracking
+│       │   ├── campaign_service.py # Personalized post-booking email campaigns
+│       │   ├── email_service.py  # Transactional booking confirmation emails (Brevo)
+│       │   └── payment_service.py# Mock Razorpay checkout & webhook verification
+│       ├── utils/
+│       │   ├── cache.py          # SerpAPI caching engine (TTL/parameter normalization)
+│       │   └── mock_data.py      # Fallback database listings
+│       └── main.py               # Application entry point server
 ├── .env.example                  # Template configuration environment
-├── requirements.txt              # Backend packages
+├── requirements.txt              # Backend dependencies
 └── README.md                     # Documentation
 ```
 
@@ -209,16 +207,6 @@ graph TD
     npm run dev
     ```
     Open your browser and navigate to the local address displayed (typically `http://localhost:5173`).
-
----
-
-### 3. Running the Test Suite
-The repository includes unit and integration tests (using `pytest`) to verify agent logic, caching functionality, and date/price parsing.
-1.  Activate your virtual environment.
-2.  From the `travel-chatbot` root directory, run:
-    ```bash
-    python -m pytest
-    ```
 
 ---
 
