@@ -5,7 +5,7 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     SERPAPI_API_KEY: str = ""
     BREVO_API_KEY: str = ""
-    BREVO_SENDER_EMAIL: str = "bookings@sarachotbot.local"
+    BREVO_SENDER_EMAIL: str = "soujanyasp27@gmail.com"
     SARVAM_API_KEY: str = ""
     
     # Razorpay Payment Gateway configuration
