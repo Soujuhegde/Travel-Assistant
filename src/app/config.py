@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     RAZORPAY_KEY_SECRET: str = ""
     
     # Optional parameters
-    LLM_MODEL: str = "llama-3.1-8b-instant"
+    LLM_MODEL: str = "openai/gpt-oss-120b"
     
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
