@@ -12,8 +12,8 @@ class ExtractedInfo(BaseModel):
     intent: Literal["book_flight", "book_hotel", "plan_itinerary", "general_qa", "select_flight", "select_hotel", "provide_details", "payment_done", "provide_passenger_count", "confirm", "reject"] = "general_qa"
     origin: str | None = Field(description="The 3-letter IATA code of the origin city or airport (e.g. 'BLR', 'DEL', 'JFK', 'TYO'). ALWAYS convert full city or country names to their primary 3-letter IATA code.", default=None)
     destination: str | None = Field(description="The 3-letter IATA code of the destination city or airport (e.g. 'BLR', 'DEL', 'JFK', 'TYO'). ALWAYS convert full city or country names to their primary 3-letter IATA code.", default=None)
-    departure_date: str | None = None
-    return_date: str | None = None
+    departure_date: str | None = Field(description="The departure date in YYYY-MM-DD format. CRITICAL: ONLY extract this if the user EXPLICITLY mentions a date or time expression in their message (e.g. 'tomorrow', 'next Monday', '20th Sept'). If no date was explicitly stated by the user, leave as null. NEVER invent or assume a date.", default=None)
+    return_date: str | None = Field(description="The return date in YYYY-MM-DD format. ONLY extract this if the user explicitly specifies a return date or relative return duration. Otherwise leave as null.", default=None)
     limit: int | None = Field(description="The number of flights the user wants to see, if they explicitly mention a number (e.g. 'show me 5 flights').", default=None)
     journey_type: Literal["One Way", "Round Trip"] | None = Field(description="The type of journey. ONLY populate this if the user explicitly mentions 'one way', 'round trip', 'return', 'single ticket', etc. Otherwise, set to null.", default=None)
     selected_class: str | None = None
@@ -512,7 +512,8 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
     - If the user is selecting an option, populate 'selected_option_index' with the 0-based index of the selected option, and if they specify a class like 'economy' or 'business', extract it into 'selected_class'.
  
     Rules for Date Extraction:
-    - ALWAYS convert departure_date, check_in_date, and check_out_date strictly to YYYY-MM-DD format.
+    - CRITICAL: ONLY extract departure_date, check_in_date, and check_out_date if the user EXPLICITLY mentions a date, day of week, or relative time phrase in their message (e.g. 'tomorrow', 'next Friday', '20th Sept'). If the user has NOT provided a date (e.g., they only said 'Bengaluru to Goa' or 'One Way'), set departure_date to null. NEVER assume, guess, or invent a departure date.
+    - ALWAYS convert explicit departure_date, check_in_date, and check_out_date strictly to YYYY-MM-DD format.
     - If check_out_date is described relative to check_in_date (e.g. "for 2 nights", "in 2 days", "tomorrow" relative to check_in), calculate check_out_date by adding that duration to check_in_date.
     - If the user says "next [day]" (e.g., "next monday"), use the exact date for that day from the "Upcoming 7 days reference". Do NOT add an extra week.
     - Convert all origin and destination cities/countries/airports strictly to their most prominent 3-letter IATA airport code.
@@ -533,7 +534,8 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
         structured_llm = llm.with_structured_output(ExtractedInfo)
         result = structured_llm.invoke(messages)
     except Exception as e:
-        print(f"Structured LLM failed: {e}. Using rule-based fallback parser.")
+        safe_err = str(e).encode('ascii', 'ignore').decode('ascii')
+        print(f"Structured LLM failed: {safe_err}. Using rule-based fallback parser.")
         result = rule_based_fallback(user_msg_text, step, state)
     
     step = state.get("current_step", "start")

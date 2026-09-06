@@ -26,9 +26,6 @@ function App() {
               </span>
             )}
           </div>
-          <div className="bg-brand-dark px-4 py-2 rounded-full text-sm font-medium">
-            Demo Mode
-          </div>
         </header>
 
         <main className="flex-1 overflow-hidden relative">

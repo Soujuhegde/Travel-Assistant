@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ShieldCheck, Lock, CreditCard, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
-const PaymentCheckoutCard = ({ paymentDetails, onPay }) => {
+const PaymentCheckoutCard = ({ paymentDetails, onPay, onDirectPay }) => {
   const [isProcessing, setIsProcessing] = useState(false);
 
   if (!paymentDetails) return null;
@@ -93,6 +93,19 @@ const PaymentCheckoutCard = ({ paymentDetails, onPay }) => {
             </>
           )}
         </button>
+
+        {/* Quick Test Pay Button */}
+        {onDirectPay && (
+          <button
+            onClick={() => onDirectPay(paymentDetails)}
+            disabled={isProcessing}
+            type="button"
+            className="w-full py-2 px-4 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-600 hover:text-slate-800 font-semibold text-xs border border-slate-200/80 transition-all flex items-center justify-center gap-1.5 active:scale-[0.99]"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+            <span>⚡ Instant Test Payment (Bypass Gateway Modal)</span>
+          </button>
+        )}
 
         {/* Trust Badges */}
         <div className="flex items-center justify-center gap-4 text-[11px] text-slate-400 pt-1">

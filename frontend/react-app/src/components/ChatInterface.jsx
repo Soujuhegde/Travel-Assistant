@@ -185,6 +185,38 @@ const ChatInterface = ({ onFlowChange }) => {
     rzp.open();
   };
 
+  const handleDirectPaymentVerification = async (paymentDetails) => {
+    setIsTyping(true);
+    try {
+      const verifyRes = await axios.post('http://localhost:8000/api/payment/verify', {
+        session_id: sessionId,
+        razorpay_order_id: paymentDetails.order_id,
+        razorpay_payment_id: 'pay_test_' + Date.now(),
+        razorpay_signature: 'mock_signature',
+        is_upsell: false
+      });
+
+      const botMessage = {
+        id: Date.now() + 1,
+        sender: 'bot',
+        text: verifyRes.data.message || "🎉 Payment confirmed! Your booking is complete and your ticket has been emailed to you.",
+        ticket: verifyRes.data.ticket,
+        upsell_details: verifyRes.data.upsell_details,
+        quick_replies: ["Book another flight", "Book a hotel", "Plan an itinerary"]
+      };
+      setMessages(prev => [...prev, botMessage]);
+    } catch (err) {
+      console.error("Payment verification failed:", err);
+      setMessages(prev => [...prev, {
+        id: Date.now() + 1,
+        sender: 'bot',
+        text: "⚠️ Payment verification encountered an issue. Please check your connection or contact support."
+      }]);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
   const handleUpsellCheckout = (upsellDetails) => {
     if (!window.Razorpay) {
       alert("Razorpay payment gateway SDK is loading.");
@@ -415,6 +447,7 @@ const ChatInterface = ({ onFlowChange }) => {
               }
             }}
             onPay={handleRazorpayCheckout}
+            onDirectPay={handleDirectPaymentVerification}
             onUpsellPay={handleUpsellCheckout}
             onUpsellDecline={handleUpsellDecline}
           />

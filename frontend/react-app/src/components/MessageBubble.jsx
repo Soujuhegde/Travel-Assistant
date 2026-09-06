@@ -389,7 +389,7 @@ const ItineraryTimeline = ({ text, isUser }) => {
   );
 };
 
-const MessageBubble = ({ message, onQuickReply, onOptionSelect, onPay, onUpsellPay, onUpsellDecline }) => {
+const MessageBubble = ({ message, onQuickReply, onOptionSelect, onPay, onDirectPay, onUpsellPay, onUpsellDecline }) => {
   const isUser = message.sender === 'user';
   const hasItinerary = !isUser && parseItinerary(message.text);
 
@@ -450,7 +450,8 @@ const MessageBubble = ({ message, onQuickReply, onOptionSelect, onPay, onUpsellP
           <div className="mt-4 w-full">
             <PaymentCheckoutCard 
               paymentDetails={message.payment_details} 
-              onPay={onPay} 
+              onPay={onPay}
+              onDirectPay={onDirectPay}
             />
           </div>
         )}
