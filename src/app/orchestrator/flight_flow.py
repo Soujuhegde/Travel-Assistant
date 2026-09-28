@@ -109,7 +109,15 @@ def handle_flight_clarification(step: str, state: Dict[str, Any]) -> Dict[str, A
         replies = ["1 adult", "2 adults", "2 adults, 1 child"]
     elif step == "verify_passenger_count":
         count = state.get("passenger_count", {})
-        msg = f"Wonderful! Please verify the number of passengers.\n- Adults: {count.get('adults', 0)}\n- Children: {count.get('children', 0)}\n- Infants: {count.get('infants', 0)}"
+        if isinstance(count, dict):
+            adults = count.get('adults', 1)
+            children = count.get('children', 0)
+            infants = count.get('infants', 0)
+        else:
+            adults = int(count) if count else 1
+            children = 0
+            infants = 0
+        msg = f"Wonderful! Please verify the number of passengers.\n- Adults: {adults}\n- Children: {children}\n- Infants: {infants}"
         replies = ["Yes", "No"]
     elif step == "awaiting_passenger_details":
         pax_idx = state.get("current_passenger_index") or 0
@@ -124,7 +132,15 @@ def handle_flight_clarification(step: str, state: Dict[str, Any]) -> Dict[str, A
         if not pax.get("contact"): missing.append("Contact No")
         if not pax.get("passport"): missing.append("Passport No")
         
-        total_pax = (state.get("passenger_count") or {}).get("total") or 1
+        cnt = state.get("passenger_count")
+        if isinstance(cnt, dict):
+            total_pax = cnt.get("total") or cnt.get("adults", 1) or 1
+        elif isinstance(cnt, int):
+            total_pax = cnt
+        elif pax_list:
+            total_pax = len(pax_list)
+        else:
+            total_pax = 1
         pax_label = f"Passenger {pax_idx + 1} of {total_pax}"
         
         clarification = state.get("pending_clarification")
@@ -169,7 +185,15 @@ def handle_flight_clarification(step: str, state: Dict[str, Any]) -> Dict[str, A
             pricing_list = selected_flight.get('pricing', [])
             raw_price = pricing_list[0].get('price', 'N/A') if pricing_list else 'N/A'
             
-        total_pax = (state.get("passenger_count") or {}).get("total") or len(passengers_details) or 1
+        cnt = state.get("passenger_count")
+        if isinstance(cnt, dict):
+            total_pax = cnt.get("total") or cnt.get("adults", 1) or len(passengers_details) or 1
+        elif isinstance(cnt, int):
+            total_pax = cnt
+        elif passengers_details:
+            total_pax = len(passengers_details)
+        else:
+            total_pax = 1
         try:
             price_digits = int("".join(filter(str.isdigit, raw_price.split(".")[0])))
             total_calc = price_digits * total_pax

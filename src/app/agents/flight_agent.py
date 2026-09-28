@@ -383,7 +383,11 @@ def search_node(state: FlightAgentState) -> Dict[str, Any]:
             print(f"SerpAPI Error: {e}")
 
     if not results:
-        print("No real-time flights found.")
+        print("No real-time flights found. Falling back to mock data.")
+        from app.utils.mock_data import mock_search_flights
+        fallback = mock_search_flights(params)
+        if fallback.get("status") == "success":
+            results = fallback.get("results", [])
         
     return {
         "results": results,

@@ -213,7 +213,7 @@ def call_hotel_agent(request: TaskRequest) -> TaskResponse:
 
     return TaskResponse(
         task_id=output["task_id"],
-        status="success" if output["results"] else "failed",
+        status=output.get("status", "success"),
         results=output["results"],
         clarification_needed=output["clarification_needed"],
         error=output["error"],

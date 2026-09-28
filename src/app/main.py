@@ -1,5 +1,11 @@
 import os
+import sys
 from dotenv import load_dotenv
+
+# Ensure 'src' is in sys.path
+src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if src_dir not in sys.path:
+    sys.path.insert(0, src_dir)
 
 # Load environment variables BEFORE importing routers
 env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.env"))
@@ -31,4 +37,4 @@ def health_check():
     return {"status": "healthy"}
 
 if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True, app_dir=src_dir)

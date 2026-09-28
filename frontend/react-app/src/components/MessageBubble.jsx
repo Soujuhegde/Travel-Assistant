@@ -96,33 +96,42 @@ const renderMessageText = (text, isUser) => {
   const boldBgClass = isUser ? 'bg-white/10 text-white' : 'bg-indigo-50/50 text-slate-800';
   const bulletColorClass = isUser ? 'text-white/80' : 'text-indigo-500';
 
-  const lines = text.split('\n');
+  // Sanitize any code block markers or html tags that might slip through
+  let cleanText = text
+    .replace(/^```[a-zA-Z]*\n?/gm, '')
+    .replace(/```$/gm, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<li>/gi, '- ')
+    .replace(/<\/?[a-zA-Z][^>]*>/g, '');
+
+  const lines = cleanText.split('\n');
 
   return lines.map((line, index) => {
-    if (line.startsWith('### ')) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('### ')) {
       return (
         <h3 key={index} className={`font-bold ${headingColorClass} text-[20px] md:text-[21px] mt-4 mb-2 flex items-center gap-1.5 border-b pb-1`}>
-          {renderLineContent(line.slice(4), isUser, boldBgClass)}
+          {renderLineContent(trimmed.slice(4), isUser, boldBgClass)}
         </h3>
       );
     }
-    if (line.startsWith('## ')) {
+    if (trimmed.startsWith('## ')) {
       return (
         <h2 key={index} className={`font-black ${headingColorClass} text-[22px] md:text-[23px] mt-5 mb-3 flex items-center gap-1.5`}>
-          {renderLineContent(line.slice(3), isUser, boldBgClass)}
+          {renderLineContent(trimmed.slice(3), isUser, boldBgClass)}
         </h2>
       );
     }
-    if (line.startsWith('# ')) {
+    if (trimmed.startsWith('# ')) {
       return (
         <h1 key={index} className={`font-black ${headingColorClass} text-[24px] md:text-[25px] mt-5 mb-4`}>
-          {renderLineContent(line.slice(2), isUser, boldBgClass)}
+          {renderLineContent(trimmed.slice(2), isUser, boldBgClass)}
         </h1>
       );
     }
 
-    if (line.trim().startsWith('* ') || line.trim().startsWith('- ')) {
-      const content = line.trim().slice(2);
+    if (trimmed.startsWith('* ') || trimmed.startsWith('- ') || trimmed.startsWith('• ')) {
+      const content = trimmed.replace(/^[*•-]\s*/, '');
       return (
         <div key={index} className={`flex items-start gap-2 ml-4 my-1.5 ${textColorClass} leading-relaxed`}>
           <span className={`font-bold select-none ${bulletColorClass}`}>•</span>
@@ -131,7 +140,7 @@ const renderMessageText = (text, isUser) => {
       );
     }
 
-    if (line.trim() === '') {
+    if (trimmed === '') {
       return <div key={index} className="h-2" />;
     }
 
@@ -191,11 +200,21 @@ const renderTextWithLinksOnly = (text, isUser) => {
 
 const parseItinerary = (text) => {
   if (!text) return null;
-  if (!text.includes('### Day 1:') && !text.includes('### Day 1')) {
+  // Flexible match for Day 1 header (e.g. ### 🌟 Day 1, ### Day 1:, ## Day 1, **Day 1**)
+  const hasDay1 = /(?:###|##|\*\*)\s*(?:[🌟📍✨🗺️🗓️📅\w\s]*\s*)?Day\s*1\b/i.test(text);
+  if (!hasDay1) {
     return null;
   }
   
-  const lines = text.split('\n');
+  // Clean code blocks or wrappers
+  let cleanText = text
+    .replace(/^```[a-zA-Z]*\n?/gm, '')
+    .replace(/```$/gm, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<li>/gi, '- ')
+    .replace(/<\/?[a-zA-Z][^>]*>/g, '');
+
+  const lines = cleanText.split('\n');
   const days = [];
   const footers = {};
   let currentDay = null;
@@ -204,38 +223,45 @@ const parseItinerary = (text) => {
   
   for (let line of lines) {
     const trimmed = line.trim();
-    if (!trimmed) continue;
+    if (!trimmed || trimmed === '---') continue;
     
-    const isFooterHeader = trimmed.startsWith('**Travel Tips') || 
-                           trimmed.startsWith('**Hotel Details') || 
-                           trimmed.startsWith('**Flight Details') || 
-                           trimmed.startsWith('**Stay Safe') || 
-                           trimmed.startsWith('**Flight Info') ||
-                           trimmed.startsWith('**Stay Info') ||
-                           trimmed.startsWith('**Travel Guide') ||
-                           trimmed.startsWith('**Guide');
+    // Check if this is a Footer Section Header (e.g., Packing Tips, Essential Info, Local Tips, etc.)
+    const footerMatch = trimmed.match(/^(?:###|##|\*\*|- \*\*)\s*(?:[🎒📋💡🏨✈️🛡️\w\s]*\s*)?(Packing Tips|Essential Info|Travel Tips|Local Tips|Hotel Details|Flight Details|Safety Tips|Emergency Numbers|Travel Guide|Best Apps|Guide)\b/i);
                            
-    if (isFooterHeader) {
-      currentFooterSection = trimmed.replace(/\*\*/g, '').replace(/:/g, '').trim();
+    if (footerMatch) {
+      currentFooterSection = footerMatch[1].trim();
       footers[currentFooterSection] = [];
       currentDay = null;
+      continue;
     } else if (currentFooterSection) {
-      if (trimmed.startsWith('* ') || trimmed.startsWith('- ')) {
-        footers[currentFooterSection].push(trimmed.slice(2));
-      } else {
-        footers[currentFooterSection].push(trimmed);
+      // Check if another day started (should not happen after footers, but for safety)
+      const isDayHeader = /^(?:###|##|\*\*)\s*(?:[🌟📍✨🗺️🗓️📅\s]*\s*)?Day\s*\d+\b/i.test(trimmed);
+      if (!isDayHeader) {
+        if (trimmed.startsWith('* ') || trimmed.startsWith('- ') || trimmed.startsWith('• ')) {
+          footers[currentFooterSection].push(trimmed.replace(/^[*•-]\s*/, ''));
+        } else {
+          footers[currentFooterSection].push(trimmed);
+        }
+        continue;
       }
-    } else if (trimmed.startsWith('### Day ') || trimmed.startsWith('## Day ')) {
-      const title = trimmed.replace(/^#+\s*/, '');
+    }
+    
+    // Check if this is a Day Header (e.g., "### 🌟 Day 1: Coastal Explorations", "## Day 2", "### Day 3 - Forts")
+    const dayHeaderMatch = trimmed.match(/^(?:###|##|\*\*)\s*(?:[🌟📍✨🗺️🗓️📅\s]*\s*)?Day\s*(\d+)[:\-–\s]*(.*)$/i);
+    if (dayHeaderMatch) {
+      const dayNum = dayHeaderMatch[1];
+      const dayTheme = dayHeaderMatch[2].replace(/\*\*/g, '').trim();
+      const title = dayTheme ? `Day ${dayNum}: ${dayTheme}` : `Day ${dayNum}`;
       currentDay = {
         title: title,
         activities: [],
         summary: ''
       };
       days.push(currentDay);
+      currentFooterSection = null;
     } else if (currentDay) {
-      if (trimmed.startsWith('* ') || trimmed.startsWith('- ')) {
-        currentDay.activities.push(trimmed.slice(2));
+      if (trimmed.startsWith('* ') || trimmed.startsWith('- ') || trimmed.startsWith('• ')) {
+        currentDay.activities.push(trimmed.replace(/^[*•-]\s*/, ''));
       } else if (!trimmed.startsWith('#') && !trimmed.startsWith('**Trip Details') && !trimmed.includes('Duration:')) {
         if (currentDay.activities.length === 0) {
           currentDay.summary = trimmed;
@@ -261,7 +287,15 @@ const ItineraryTimeline = ({ text, isUser }) => {
     return null;
   }
 
-  const cleanTitle = parsed.intro.replace(/\*\*/g, '').replace(/Trip Details:/g, '').trim().split('\n')[0];
+  // Extract clean destination / title
+  let cleanTitle = 'Travel Itinerary';
+  const destMatch = text.match(/Destination:\s*\*?([A-Za-z\s]+)\*?/i) || text.match(/Itinerary for\s*\*?([A-Za-z\s]+)\*?/i);
+  if (destMatch) {
+    cleanTitle = `${destMatch[1].trim()} Itinerary`;
+  } else if (parsed.intro) {
+    const rawFirst = parsed.intro.replace(/\*\*/g, '').replace(/Trip Details:/g, '').trim().split('\n')[0];
+    if (rawFirst) cleanTitle = rawFirst;
+  }
   const currentDayData = parsed.days[activeDay];
 
   return (

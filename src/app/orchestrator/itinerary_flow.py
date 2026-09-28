@@ -3,6 +3,7 @@ from typing import Dict, Any
 from langchain_core.messages import SystemMessage
 from app.orchestrator.nlu_parser import llm
 from app.config import settings
+from app.utils.cleaner import clean_travel_response
 
 def get_itinerary_contextual_reminder(step: str, state: Dict[str, Any]) -> str | None:
     hotel_params = state.get("hotel_params") or {}
@@ -78,58 +79,67 @@ Trip Details:
 - ✈️ Flight: {airline_name if airline_name else "To be arranged"}
 - 👥 Travellers: {guests}
 
-STRICT OUTPUT FORMAT — Follow this EXACTLY for EVERY SINGLE DAY:
+STRICT OUTPUT FORMAT — Follow this clean markdown structure for EVERY SINGLE DAY:
 
 ### 🌟 Day [N]: [Catchy Theme Title]
 **📅 Date:** [Starting date + N-1 days]
 
 **🌅 Morning (8:00 AM – 12:00 PM)**
-- 🍳 **Breakfast:** [Specific local restaurant + must-try dish + estimated cost]
-- 🗺️ [Activity 1]: [Specific location name, what to see/do, how long, entry fees if any]
-- 🗺️ [Activity 2]: [Specific location name, insider tip, best time to visit]
-- 🚌 **Transport:** [Specific transport mode, cost, travel time from hotel/previous spot]
+- 🍳 **Breakfast:** [Restaurant name] — [Must-try dish] (Approx. ₹[Cost])
+- 🏛️ **Sightseeing:** [Specific attraction/monument] — [What to explore, highlights, insider tip, duration]
+- 🗺️ **Excursion:** [Specific spot/activity] — [Key details and entry info]
+- 🚗 **Transport:** [Transport mode, approx cost, travel time]
 
 **☀️ Afternoon (12:00 PM – 6:00 PM)**
-- 🍽️ **Lunch:** [Specific restaurant, signature dish, price range]
-- 🗺️ [Activity 3]: [Location, what makes it special, photography tips]
-- 🛍️ **Shopping/Leisure:** [Market or area name, what to buy, bargaining tips]
-- 🚌 **Transport:** [How to get to evening location]
+- 🍽️ **Lunch:** [Restaurant name] — [Signature dish and price range]
+- 🎭 **Experience:** [Cultural activity, museum, or landmark] — [What makes it special]
+- 🛍️ **Shopping & Leisure:** [Market or street name] — [What to buy and local specialties]
+- 🚗 **Transport:** [Transport to evening spot]
 
 **🌙 Evening (6:00 PM – 10:00 PM)**
-- 🌆 [Evening activity/viewpoint/show]: [Full details, booking tips]
-- 🍷 **Dinner:** [Restaurant name, cuisine type, ambiance, must-order dishes, reservation needed?]
-- 🎵 **After Dinner:** [Night market/bar/cultural show suggestion if applicable]
+- 🌆 **Sunset & Views:** [Best viewpoint or promenade]
+- 🍷 **Dinner:** [Restaurant name] — [Cuisine type, atmosphere, recommended dishes]
+- 🎵 **Nightlife & Leisure:** [Night market, cafe, live music, or cultural show]
 
-**💡 Local Tips for Day [N]:**
-- [Practical tip 1 — dress code, safety, language phrase, etc.]
-- [Practical tip 2 — best photo spots, avoid tourist traps, local custom]
+**💡 Local Tips:**
+- [Practical insider tip 1 — dress code, timing, or local etiquette]
+- [Practical insider tip 2 — photography spots, hidden gems]
 
 **💰 Estimated Daily Budget:** ₹[X,XXX] – ₹[X,XXX] per person (excluding hotel)
 
 ---
 
-RULES YOU MUST FOLLOW:
-1. Generate ALL {itinerary_days} days with FULL detail — NO shortcuts, NO "similar to previous day"
-2. Name REAL, specific places, restaurants, and attractions in {city}
-3. Include REALISTIC travel times and costs in local currency
-4. Each day must be DISTINCT with different attractions and neighborhoods  
-5. Use rich emojis throughout to make it visually engaging
-6. At the very end, add a **🎒 Packing Tips** section and a **📋 Essential Info** section (visa, currency, emergency numbers, best apps to use)
+### 🎒 Packing Tips
+- [Item 1]
+- [Item 2]
+- [Item 3]
 
-Start the itinerary now with Day 1 and go all the way through Day {itinerary_days} without stopping."""
+### 📋 Essential Info
+- **Emergency Numbers:** 112 (All-in-one Emergency Helpline)
+- **Currency:** Indian Rupee (INR ₹)
+- **Best Apps:** Google Maps, Uber / Ola, Zomato
+
+CRITICAL FORMATTING RULES:
+1. Generate ALL {itinerary_days} days with full detail.
+2. Name REAL, specific places and restaurants in {city}.
+3. DO NOT wrap the output in code blocks (no ``` or ```markdown). Output pure, readable text only.
+4. DO NOT use markdown tables (no |---|---|). Use clean bullet points instead.
+5. DO NOT use HTML tags (no <ul>, <li>, <br>, <table>).
+6. DO NOT use bracket placeholders like '[Activity 1]'. Use natural travel text.
+7. Include rich emojis for readability."""
 
         try:
             from langchain_groq import ChatGroq
-            # Use the configured model
-            itinerary_llm = ChatGroq(model=settings.LLM_MODEL, temperature=0.4, max_tokens=4096)
+            # Use the configured model with explicit API key
+            itinerary_llm = ChatGroq(model=settings.LLM_MODEL, temperature=0.4, max_tokens=4096, api_key=settings.GROQ_API_KEY)
             response = itinerary_llm.invoke([SystemMessage(content=itinerary_prompt)])
-            msg = response.content
+            msg = clean_travel_response(response.content)
         except Exception as e:
             print(f"Itinerary LLM call failed: {e}. Falling back to default LLM.")
             try:
                 if llm:
                     response = llm.invoke([SystemMessage(content=itinerary_prompt)])
-                    msg = response.content
+                    msg = clean_travel_response(response.content)
                 else:
                     raise ValueError("Default LLM is not configured")
             except Exception as ex:
@@ -152,7 +162,7 @@ def generate_fallback_itinerary(city: str, itinerary_days: int, check_in: str, h
     lines = []
     lines.append(f"# 🗺️ Custom Itinerary for {city.upper()}")
     lines.append("")
-    lines.append("Here is your detailed luxury travel plan:")
+    lines.append("Here is your curated travel plan:")
     lines.append("")
     lines.append(f"**Trip Details:**")
     lines.append(f"- 🌍 **Destination:** {city}")
@@ -164,25 +174,40 @@ def generate_fallback_itinerary(city: str, itinerary_days: int, check_in: str, h
     lines.append("---")
     lines.append("")
     
-    # Generic, engaging activities mapping for fallback cities
+    # Curated, engaging activities mapping for popular cities
     activities_by_city = {
+        "GOA": [
+            ("North Goa Beach Culture & Coastal Forts", "Breakfast at Infantaria Café (Calangute, ₹300)", "Visit historic Fort Aguada and lighthouse overlooking the Arabian Sea", "Relax at Candolim and Baga beach shacks with water sports", "Scooter / Taxi rental (₹500/day)"),
+            ("Old Goa Heritage & Latin Quarter Romance", "Breakfast at Viva Panjim (Fontainhas, ₹350)", "Explore Basilica of Bom Jesus and Se Cathedral in Old Goa", "Heritage walking tour through the colorful Portuguese quarter of Fontainhas", "Cab ride to Panjim (₹400, 30 mins)"),
+            ("South Goa Serenity & Scenic Waterfalls", "Breakfast at Dropadi Restaurant (Palolem, ₹400)", "Day trip to the magnificent Dudhsagar Falls", "Sunset beach relaxation at Palolem Beach and butterfly island boat ride", "Private taxi hire (₹2,000 full day)"),
+        ],
+        "GOI": [
+            ("North Goa Beach Culture & Coastal Forts", "Breakfast at Infantaria Café (Calangute, ₹300)", "Visit historic Fort Aguada and lighthouse overlooking the Arabian Sea", "Relax at Candolim and Baga beach shacks with water sports", "Scooter / Taxi rental (₹500/day)"),
+            ("Old Goa Heritage & Latin Quarter Romance", "Breakfast at Viva Panjim (Fontainhas, ₹350)", "Explore Basilica of Bom Jesus and Se Cathedral in Old Goa", "Heritage walking tour through the colorful Portuguese quarter of Fontainhas", "Cab ride to Panjim (₹400, 30 mins)"),
+            ("South Goa Serenity & Scenic Waterfalls", "Breakfast at Dropadi Restaurant (Palolem, ₹400)", "Day trip to the magnificent Dudhsagar Falls", "Sunset beach relaxation at Palolem Beach and butterfly island boat ride", "Private taxi hire (₹2,000 full day)"),
+        ],
         "DEL": [
-            ("Historical Splendors of Old Delhi", "Breakfast at Karim's (Mutton Korma & Roti, ₹350)", "Visit Red Fort (UNESCO heritage site, fee ₹35)", "Walk through Chandni Chowk spice markets", "Rickshaw ride (₹100, 15 mins)"),
-            ("New Delhi Landmarks & Lutyens Zone", "South Indian Breakfast at Saravana Bhavan (₹200)", "Explore India Gate and War Memorial", "Visit Qutub Minar complex", "Metro ride to Rajiv Chowk (₹40, 20 mins)"),
-            ("Cultural Temples & Spiritual Walk", "Breakfast at Wenger's (Connaught Place, ₹300)", "Visit Lotus Temple", "Explore Akshardham Temple complex", "Auto-rickshaw ride (₹120, 25 mins)"),
+            ("Historical Splendors of Old Delhi", "Breakfast at Karim's (Mutton Korma & Roti, ₹350)", "Visit Red Fort (UNESCO heritage site) and Jama Masjid", "Walk through Chandni Chowk spice markets and Dariba Kalan", "Cycle rickshaw ride (₹100, 15 mins)"),
+            ("New Delhi Landmarks & Lutyens Zone", "South Indian Breakfast at Saravana Bhavan (₹200)", "Explore India Gate, National War Memorial, and Rashtrapati Bhavan", "Visit Qutub Minar complex and Mehrauli Archaeological Park", "Delhi Metro ride to Rajiv Chowk (₹40, 20 mins)"),
+            ("Cultural Temples & Spiritual Walk", "Breakfast at Wenger's (Connaught Place, ₹300)", "Visit Lotus Temple and serene gardens", "Explore Akshardham Temple complex and musical fountain show", "Auto-rickshaw ride (₹120, 25 mins)"),
         ],
         "BOM": [
-            ("Gateway to Mumbai Heritage Walk", "Breakfast at Café Mondegar (Keema Ghotala, ₹400)", "Visit Gateway of India", "Walk around Colaba Causeway", "Taxi ride (₹80, 10 mins)"),
-            ("Coastal Drives & Sunset Promenades", "Breakfast at Yazdani Bakery (Bun Maska & Chai, ₹150)", "Visit Marine Drive", "Explore Haji Ali Dargah", "Local train ride (₹15, 20 mins)"),
-            ("Artistic Passages & Ancient Caves", "Breakfast at Theobroma (Connaught Place CP or Colaba, ₹250)", "Ferry to Elephanta Caves", "Visit Jehangir Art Gallery", "Ferry ride (₹200, 1 hour)"),
+            ("Gateway to Mumbai Heritage Walk", "Breakfast at Café Mondegar (Keema Ghotala, ₹400)", "Visit Gateway of India and the iconic Taj Mahal Palace hotel", "Walk around Colaba Causeway and Kala Ghoda Art District", "Taxi ride (₹80, 10 mins)"),
+            ("Coastal Drives & Sunset Promenades", "Breakfast at Yazdani Bakery (Bun Maska & Chai, ₹150)", "Visit Marine Drive and walk along the Queen's Necklace", "Explore Haji Ali Dargah and Bandra Bandstand", "Local train / cab ride (₹150, 25 mins)"),
+            ("Artistic Passages & Ancient Caves", "Breakfast at Theobroma (Colaba, ₹250)", "Ferry excursion to Elephanta Caves (UNESCO World Heritage Site)", "Visit Jehangir Art Gallery and National Gallery of Modern Art", "Ferry ride (₹200 return)"),
+        ],
+        "BLR": [
+            ("Garden City & Royal Heritage", "Breakfast at CTR / Shri Sagar (Benne Masala Dosa, ₹180)", "Explore Bangalore Palace and Tipu Sultan's Summer Palace", "Stroll through Lalbagh Botanical Garden and Glass House", "Namma Metro ride (₹35, 15 mins)"),
+            ("Tech Hub, Art & Cultural Hubs", "Breakfast at Vidyarthi Bhavan (Gandhi Bazaar, ₹150)", "Visit National Gallery of Modern Art and Cubbon Park", "Explore Church Street bookstores and vibrant cafes", "Auto-rickshaw ride (₹90, 20 mins)"),
+            ("Spiritual Tranquility & Scenic Outskirts", "Breakfast at Brahmin's Coffee Bar (Idli Vada & Filter Coffee, ₹120)", "Visit ISKCON Temple and Bull Temple in Basavanagudi", "Shopping at Commercial Street and UB City mall", "Cab ride (₹250, 30 mins)"),
         ]
     }
     
     # default activities if city is not in map
     default_activities = [
-        ("Discovering Local Treasures & Museums", "Breakfast at a local café (Signature dish, ₹250)", "Visit the national museum and historical center", "Stroll through the city's botanical garden", "Walking walk (Free)"),
-        ("Scenic City Panoramas & Promenades", "Breakfast at a bakery (Pastry & coffee, ₹200)", "Visit the main viewpoint or observation tower", "Stroll down the coastal/river walk", "Public bus (₹30, 15 mins)"),
-        ("Spiritual Landmarks & Artisan Markets", "Breakfast at a street food market (Local specialty, ₹180)", "Visit the prominent local temple or cathedral", "Explore the cultural artisan and craft market", "Taxi (₹150, 20 mins)")
+        ("Discovering Local Treasures & Historic Center", "Breakfast at a top-rated local café (Signature breakfast, ₹250)", "Visit the main historic cathedral, castle, or central square", "Stroll through the botanical garden and scenic municipal park", "Walking tour & public transit (₹50)"),
+        ("Scenic Panoramas & Cultural Museums", "Breakfast at an artisan bakery (Pastry & coffee, ₹200)", "Visit the national art museum and historical exhibition center", "Enjoy panoramic sunset views from the highest city viewpoint", "Public tram / bus (₹40, 15 mins)"),
+        ("Spiritual Landmarks & Artisan Markets", "Breakfast at a traditional food market (Local specialty, ₹180)", "Explore ancient temples, architectural monuments, and historic alleys", "Browse the bustling cultural handicraft and souvenir bazaar", "Taxi / Ride-share (₹150, 20 mins)")
     ]
     
     city_key = city.upper()
@@ -198,24 +223,24 @@ def generate_fallback_itinerary(city: str, itinerary_days: int, check_in: str, h
         lines.append("")
         lines.append(f"**🌅 Morning (8:00 AM – 12:00 PM)**")
         lines.append(f"- 🍳 **Breakfast:** {b_fast}")
-        lines.append(f"- 🗺️ [Activity 1]: {act1}")
-        lines.append(f"- 🗺️ [Activity 2]: {act2}")
-        lines.append(f"- 🚌 **Transport:** {trans}")
+        lines.append(f"- 🏛️ **Sightseeing:** {act1}")
+        lines.append(f"- 🗺️ **Exploration:** {act2}")
+        lines.append(f"- 🚗 **Transport:** {trans}")
         lines.append("")
         lines.append(f"**☀️ Afternoon (12:00 PM – 6:00 PM)**")
-        lines.append(f"- 🍽️ **Lunch:** Local Restaurant (Signature Dish, ₹350)")
-        lines.append(f"- 🗺️ [Activity 3]: Shopping at Local Emporium/Market")
-        lines.append(f"- 🛍️ **Shopping/Leisure:** Buying souvenirs & local handicrafts")
-        lines.append(f"- 🚌 **Transport:** Auto-rickshaw to evening hub (₹80)")
+        lines.append(f"- 🍽️ **Lunch:** Local Specialty Restaurant (Chef's Special, ₹350)")
+        lines.append(f"- 🎭 **Experience:** Cultural monument tour & photo walk")
+        lines.append(f"- 🛍️ **Shopping & Leisure:** Buying souvenirs & local handicrafts at the central market")
+        lines.append(f"- 🚗 **Transport:** Ride to the evening promenade (₹80)")
         lines.append("")
         lines.append(f"**🌙 Evening (6:00 PM – 10:00 PM)**")
-        lines.append(f"- 🌆 [Evening activity]: Sunset views and street walk")
-        lines.append(f"- 🍷 **Dinner:** Fine Dining Restaurant (Local cuisine, ₹1,200)")
-        lines.append(f"- 🎵 **After Dinner:** Light & Sound Show or Night Market stroll")
+        lines.append(f"- 🌆 **Sunset & Views:** Golden hour viewpoint and scenic sunset walk")
+        lines.append(f"- 🍷 **Dinner:** Fine Dining Bistro (Signature multi-course meal, ₹1,200)")
+        lines.append(f"- 🎵 **Nightlife & Leisure:** Stroll through night market or enjoy live acoustic music")
         lines.append("")
-        lines.append(f"**💡 Local Tips for Day {day_num}:**")
-        lines.append(f"- Dress modestly when visiting cultural and religious sites.")
-        lines.append(f"- Stay hydrated and drink bottled mineral water.")
+        lines.append(f"**💡 Local Tips:**")
+        lines.append(f"- Dress comfortably with lightweight footwear for walking tours.")
+        lines.append(f"- Keep small local currency notes handy for markets and transport.")
         lines.append("")
         lines.append(f"**💰 Estimated Daily Budget:** ₹2,500 – ₹4,000 per person")
         lines.append("")
@@ -223,15 +248,15 @@ def generate_fallback_itinerary(city: str, itinerary_days: int, check_in: str, h
         lines.append("")
         
     lines.append("### 🎒 Packing Tips")
-    lines.append("- Comfortable walking shoes, sunscreen, sunglasses, and a hat.")
-    lines.append("- Modest clothing covering shoulders and knees for temple visits.")
-    lines.append("- Hand sanitizer and essential medications.")
+    lines.append("- Comfortable walking sneakers, breathable cotton clothing, sunglasses, and sunscreen.")
+    lines.append("- Power bank, universal adapter, and personal medication kit.")
+    lines.append("- Modest attire covering shoulders and knees for heritage/spiritual sites.")
     lines.append("")
     lines.append("### 📋 Essential Info")
-    lines.append("- **Visa:** Check requirements before arrival.")
-    lines.append("- **Currency:** Local currency. Credit cards accepted at major hubs, cash preferred at small stalls.")
-    lines.append("- **Emergency Numbers:** 112 (All-in-one helpline).")
-    lines.append("- **Best Apps:** Google Maps for navigation, Uber / local taxi apps for transport.")
+    lines.append("- **Emergency Numbers:** 112 (All-in-one Emergency Helpline).")
+    lines.append("- **Currency:** Indian Rupee (INR ₹). UPI/Cards accepted at most stores; cash handy for local stalls.")
+    lines.append("- **Best Apps:** Google Maps for transit, Uber / Ola / GoaMiles for cabs, Zomato for food reviews.")
     
     return "\n".join(lines)
+
 

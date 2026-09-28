@@ -33,7 +33,7 @@ class ExtractedInfo(BaseModel):
     selected_option_index: int | None = Field(description="The index (0-based) of the flight or hotel option the user wants to select from the options presented, or null if they are not selecting an option.", default=None)
 
 try:
-    llm = ChatGroq(model=settings.LLM_MODEL, temperature=0)
+    llm = ChatGroq(model=settings.LLM_MODEL, temperature=0, api_key=settings.GROQ_API_KEY)
 except Exception as e:
     print(f"Warning: Failed to initialize ChatGroq with model {settings.LLM_MODEL}. {e}")
     llm = None
@@ -370,16 +370,19 @@ def rule_based_fallback(text: str, step: str | None, state: Dict[str, Any]) -> E
         
     # 8. Passenger details parsing
     if step == "awaiting_passenger_details":
-        res.intent = "provide_details"
-        pax_extracted, _ = extract_passenger_fields(text_clean)
-        if pax_extracted.get("name"):
-            res.passenger_name = pax_extracted["name"]
-        if pax_extracted.get("email"):
-            res.passenger_email = pax_extracted["email"]
-        if pax_extracted.get("contact"):
-            res.passenger_contact = pax_extracted["contact"]
-        if pax_extracted.get("passport"):
-            res.passenger_passport = pax_extracted["passport"]
+        if is_question(text_clean) and not ("@" in text_clean or re.search(r"\b\d{10}\b", text_clean)):
+            res.intent = "general_qa"
+        else:
+            res.intent = "provide_details"
+            pax_extracted, _ = extract_passenger_fields(text_clean)
+            if pax_extracted.get("name"):
+                res.passenger_name = pax_extracted["name"]
+            if pax_extracted.get("email"):
+                res.passenger_email = pax_extracted["email"]
+            if pax_extracted.get("contact"):
+                res.passenger_contact = pax_extracted["contact"]
+            if pax_extracted.get("passport"):
+                res.passenger_passport = pax_extracted["passport"]
                         
     # 9. Option select by index
     if step in ["flight_selecting", "hotel_selecting"]:
@@ -684,24 +687,46 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
             step = "awaiting_departure_date"
 
     _itinerary_steps = {"itinerary_awaiting_city", "itinerary_awaiting_start_date", "itinerary_awaiting_days", "plan_itinerary"}
-    if any(w in msg_text_lower for w in ["plan an itinerary", "plan itinerary", "itinerary plan", "itinerary", "itineary", "plan an itineary", "plan itineary", "itineary plan"]) and step not in _itinerary_steps:
+    _is_itinerary_word = any(w in msg_text_lower for w in ["itinerary", "itineary", "travel plan", "trip plan", "day-by-day"])
+    _is_planning_command = any(w in msg_text_lower for w in ["plan", "create", "make", "generate", "build", "design", "give me", "show me", "suggest a", "prepare"]) or not is_question(user_msg_text)
+    
+    if _is_itinerary_word and _is_planning_command and step not in _itinerary_steps:
         result.intent = "plan_itinerary"
         pending_clarification = None
-        days_match = re.search(r"\b(\d+)\s*day", msg_text_lower)
+        days_match = re.search(r"\b(\d+)\s*(?:day|days)", msg_text_lower)
         if days_match:
             hotel_params["itinerary_days"] = int(days_match.group(1))
 
+        # Check if city is mentioned in this message
+        city_cand = result.hotel_city or result.destination
+        if not city_cand:
+            city_to_iata = {
+                "mumbai": "BOM", "bombay": "BOM", "delhi": "DEL", "new delhi": "DEL",
+                "bangalore": "BLR", "bengaluru": "BLR", "singapore": "SIN", "pune": "PNQ",
+                "goa": "GOI", "hyderabad": "HYD", "chennai": "MAA", "madras": "MAA",
+                "kolkata": "CCU", "calcutta": "CCU", "ahmedabad": "AMD", "kochi": "COK",
+                "cochin": "COK", "jaipur": "JAI", "mangalore": "IXE", "mangaluru": "IXE",
+                "london": "LHR", "paris": "CDG", "dubai": "DXB", "new york": "JFK",
+                "los angeles": "LAX", "sydney": "SYD", "tokyo": "NRT"
+            }
+            for c_name in city_to_iata:
+                if c_name in msg_text_lower:
+                    city_cand = city_to_iata[c_name]
+                    break
+        if city_cand:
+            hotel_params["city"] = city_cand
+
         existing_city = hotel_params.get("city") or flight_params.get("destination")
-        # FIX I-01: Use pre-extraction snapshots so LLM-extracted dates from this message don't count
-        existing_date = _original_check_in_date or _original_departure_date
+        existing_date = hotel_params.get("check_in_date") or flight_params.get("departure_date") or _original_check_in_date or _original_departure_date
 
         if not existing_city:
             step = "itinerary_awaiting_city"
-        elif not existing_date:
-            # Always ask for start date if no prior booking date exists
-            step = "itinerary_awaiting_start_date"
         elif not hotel_params.get("itinerary_days"):
             step = "itinerary_awaiting_days"
+        elif not existing_date:
+            # If city and days are known, default check_in to tomorrow for instant itinerary generation
+            hotel_params["check_in_date"] = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+            step = "plan_itinerary"
         else:
             step = "plan_itinerary"
     elif user_msg_text.startswith("I would like to select hotel "):
@@ -1173,12 +1198,25 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
             step = "hotel_ready_to_search"
             
         elif step == "hotel_awaiting_guest_name":
-            name_clean = user_msg_text.strip()
-            if len(name_clean) >= 2:
-                selected_hotel["guest_name"] = name_clean
+            if "," in user_msg_text:
+                parts = [p.strip() for p in user_msg_text.split(",")]
+                selected_hotel["guest_name"] = parts[0]
+                for p in parts[1:]:
+                    if "@" in p and "." in p:
+                        selected_hotel["guest_email"] = p
+                    elif re.search(r"\d{7,}", p):
+                        clean_num = re.sub(r"[^\d+]", "", p)
+                        if not clean_num.startswith("+") and len(clean_num) == 10:
+                            clean_num = "+91" + clean_num
+                        selected_hotel["guest_phone"] = clean_num
                 pending_clarification = None
             else:
-                pending_clarification = "⚠️ Validation Error:\n- Name must be at least 2 characters long."
+                name_clean = user_msg_text.strip()
+                if len(name_clean) >= 2:
+                    selected_hotel["guest_name"] = name_clean
+                    pending_clarification = None
+                else:
+                    pending_clarification = "⚠️ Validation Error:\n- Name must be at least 2 characters long."
                 
         elif step == "hotel_awaiting_guest_email":
             email_clean = user_msg_text.strip()
@@ -1190,6 +1228,8 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
                 
         elif step == "hotel_awaiting_guest_phone":
             contact_clean = re.sub(r"[^\d+]", "", user_msg_text.strip())
+            if not contact_clean.startswith("+") and len(contact_clean) == 10:
+                contact_clean = "+91" + contact_clean
             if re.match(r"^\+?\d{1,4}\d{10}$", contact_clean):
                 selected_hotel["guest_phone"] = contact_clean
                 pending_clarification = None
@@ -1260,19 +1300,30 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
         # FIX H-001: Use pre-extraction snapshots to check for REAL prior flights
         city_already_known = bool(hotel_params.get("city"))
         has_prior_flight = bool(_original_flight_destination or _original_flight_has_airline)
-        if has_prior_flight and not city_already_known:
+        
+        if hotel_params.get("city") and hotel_params.get("check_in_date") and hotel_params.get("check_out_date"):
+            step = "hotel_ready_to_search"
+        elif has_prior_flight and not city_already_known:
             # Only show city confirmation when we have a REAL prior flight and don't yet know city
             step = "hotel_confirm_city"
         elif has_prior_flight and city_already_known:
-            # City was provided in message — skip confirm, go straight to dates
-            hotel_arrival_date = flight_params.get("return_date") or _original_departure_date
-            if hotel_arrival_date:
-                step = "hotel_confirm_dates"
+            # City was provided in message — check if dates known
+            if hotel_params.get("check_in_date"):
+                step = "hotel_awaiting_check_out"
             else:
-                step = "hotel_awaiting_check_in"
+                hotel_arrival_date = flight_params.get("return_date") or _original_departure_date
+                if hotel_arrival_date:
+                    step = "hotel_confirm_dates"
+                else:
+                    step = "hotel_awaiting_check_in"
         else:
-            # No prior flight — skip directly to check-in since city is now known
-            step = "hotel_awaiting_check_in" if city_already_known else "hotel_awaiting_city"
+            # No prior flight — calculate next hotel step based on what's known
+            if hotel_params.get("city") and hotel_params.get("check_in_date"):
+                step = "hotel_awaiting_check_out"
+            elif hotel_params.get("city"):
+                step = "hotel_awaiting_check_in"
+            else:
+                step = "hotel_awaiting_city"
 
     elif (result.intent == "book_flight" or user_msg_text.strip().lower() in ["book a flight", "book flight", "flight", "fly"]) and not is_gathering_details:
         # Starting a fresh flight booking:
